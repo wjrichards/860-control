@@ -35,3 +35,15 @@ Once, the first brightness change after an external Ripple sent effect `Breathe`
 ## Side effect during testing
 
 While `g512d` was masked and the stand-in held its name, the user's `systemctl --user start g512d` failed. The service was unmasked and restarted, and the saved state was set back to Static white.
+
+## 4.4 Live apply on a real drag (user dragging, 2026-10-22 06:56 UTC)
+
+The capture used `stdbuf -oL busctl --user monitor --match "type='method_call',member='SetState'"`, stopped with SIGINT. Two earlier captures lost lines: busctl block-buffers output to a file, and `timeout`'s default SIGTERM dropped the buffer.
+
+The user dragged **Speed** (same throttle as Brightness):
+
+- **Main drag:** 66 → 32 sent as **14 calls over 1456 ms**. Gaps in ms: 209.7, 99.5, 100.0, 100.1 ×8, 147.0, 99.4. The sub-100 values are bus-timestamp noise; the app's 100 ms timer never fires early.
+- **Further small moves:** 9 more calls in pairs or threes, also about 100 ms apart.
+- **Final value:** 52. The service `State` is `"Ripple" 154 153 150 52 100`, and the app's Speed slider shows 52.0.
+
+Still open for 4.4: the toast and rollback when the service rejects an update.
