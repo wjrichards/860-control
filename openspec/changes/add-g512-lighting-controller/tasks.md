@@ -7,11 +7,11 @@
 
 ## 2. Protocol crate (`g512-hidpp`)
 
-- [ ] 2.1 Create the Cargo workspace with `g512-hidpp`, `g512d` and `g512-control` crates; verify `cargo build -p g512-hidpp -p g512d` succeeds on the host with no C dependencies (`cargo tree` shows no `-sys` crates)
-- [ ] 2.2 Implement the `Feature` allowlist enum and request builder; verify a unit test asserts the enum holds exactly `0x0000, 0x0001, 0x0003, 0x0005, 0x8070, 0x8080`
-- [ ] 2.3 Implement device discovery from sysfs (USB ID + `0xFF43` usage page); verify unit tests using the recorded descriptors in `evidence/feature-table.txt` select interface 1 and reject interface 0 and a mouse descriptor
-- [ ] 2.4 Implement the transport with reply matching, HID++ error decoding, skipping unrelated reports, and the 1 s timeout over a `Transport` trait; verify unit tests with a fake transport cover a normal reply, an error reply, an interleaved key report, and a timeout
-- [ ] 2.5 Implement feature resolution, device name / firmware reads, and effect discovery; verify a replay test built from `evidence/effects-out.txt` yields Off, Static, Breathe, Cycle, Wave, Ripple selectable and `0x0005` unrecognised, and a test with a moved `0x8070` slot still resolves
+- [x] 2.1 Create the Cargo workspace with `g512-hidpp`, `g512d` and `g512-control` crates; verify `cargo build -p g512-hidpp -p g512d` succeeds on the host with no C dependencies (`cargo tree` shows no `-sys` crates)
+- [x] 2.2 Implement the `Feature` allowlist enum and request builder; verify a unit test asserts the enum holds exactly `0x0000, 0x0001, 0x0003, 0x0005, 0x8070, 0x8080`
+- [x] 2.3 Implement device discovery from sysfs (USB ID + `0xFF43` usage page); verify unit tests using the recorded descriptors in `evidence/feature-table.txt` select interface 1 and reject interface 0 and a mouse descriptor
+- [x] 2.4 Implement the transport with reply matching, HID++ error decoding, skipping unrelated reports, and the 1 s timeout over a `Transport` trait; verify unit tests with a fake transport cover a normal reply, an error reply, an interleaved key report, and a timeout
+- [x] 2.5 Implement feature resolution, device name / firmware reads, and effect discovery; verify a replay test built from `evidence/effects-out.txt` yields Off, Static, Breathe, Cycle, Wave, Ripple selectable and `0x0005` unrecognised, and a test with a moved `0x8070` slot still resolves
 - [ ] 2.6 Implement `setZoneEffect` using the layout recorded in task 1.2, RAM-only; verify unit tests check the exact bytes for each effect against `evidence/set-zone-effect.md`, and a hardware test (`cargo test -- --ignored`) sets Static green on the real keyboard
 
 ## 3. Service (`g512d`)

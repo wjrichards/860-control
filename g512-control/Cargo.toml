@@ -1,0 +1,12 @@
+[package]
+name = "g512-control"
+description = "GNOME app for choosing the G512 keyboard's lighting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# GTK4/libadwaita are added in task group 4. The app is built inside the
+# GNOME 50 Flatpak SDK; the host has no GTK development files, which is why
+# this crate is not in the workspace's default-members.
+[dependencies]

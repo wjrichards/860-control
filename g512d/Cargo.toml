@@ -1,0 +1,10 @@
+[package]
+name = "g512d"
+description = "User service that owns the G512 keyboard and exposes lighting control over D-Bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+g512-hidpp = { path = "../g512-hidpp" }
