@@ -13,8 +13,8 @@ pub enum Error {
     FeatureMissing(Feature),
     /// The zone does not offer this effect.
     EffectUnavailable(EffectKind),
-    /// A speed value outside the range tested on the keyboard.
-    OutOfRange { kind: EffectKind, value: u16 },
+    /// A speed or intensity value outside the range tested on the keyboard.
+    OutOfRange { kind: EffectKind, what: &'static str, value: u16 },
     /// The device replied with data this crate cannot interpret.
     Protocol(String),
 }
@@ -33,8 +33,8 @@ impl fmt::Display for Error {
             }
             Error::FeatureMissing(feature) => write!(f, "device does not support {feature}"),
             Error::EffectUnavailable(kind) => write!(f, "zone does not offer the {} effect", kind.name()),
-            Error::OutOfRange { kind, value } => {
-                write!(f, "speed value {value} is outside the {} range", kind.name())
+            Error::OutOfRange { kind, what, value } => {
+                write!(f, "{what} {value} is outside the {} range", kind.name())
             }
             Error::Protocol(msg) => write!(f, "unexpected reply: {msg}"),
         }

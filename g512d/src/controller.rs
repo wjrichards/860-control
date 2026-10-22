@@ -224,13 +224,7 @@ impl<O: Opener> Controller<O> {
 
     fn apply(&mut self, state: &LightingState) -> Result<(), HidppError> {
         let conn = self.conn.as_mut().expect("apply needs a connection");
-        effects::set_effect(
-            &mut conn.device,
-            &conn.zone,
-            state.device_effect(),
-            state.device_color(),
-            state.device_speed(),
-        )
+        effects::set_effect(&mut conn.device, &conn.zone, state.device_effect(), &state.device_params())
     }
 
     fn apply_saved(&mut self) {

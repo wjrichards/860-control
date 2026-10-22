@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use g512_hidpp::effects::{EffectKind, Rgb};
+use g512_hidpp::effects::{EffectKind, EffectParams, Rgb};
 
 pub const SPEED_MIN: u8 = 1;
 /// The fastest speed.
@@ -76,6 +76,16 @@ impl LightingState {
     pub fn device_speed(&self) -> u16 {
         self.effect.speed_range().map_or(0, |range| speed_to_device(self.speed, *range.start(), *range.end()))
     }
+
+    /// Brightness for effects without a colour (Cycle, Wave) goes through the
+    /// effect's intensity value; colour effects are dimmed by their colour.
+    pub fn device_intensity(&self) -> u8 {
+        if self.effect.accepts_color() { BRIGHTNESS_MAX } else { self.brightness.clamp(1, BRIGHTNESS_MAX) }
+    }
+
+    pub fn device_params(&self) -> EffectParams {
+        EffectParams { color: self.device_color(), speed: self.device_speed(), intensity: self.device_intensity() }
+    }
 }
 
 /// Map speed 1..=100 geometrically onto `fastest..=slowest`, where a bigger
@@ -112,6 +122,17 @@ mod tests {
         let s = state(EffectKind::Static, "#FF8040", 50, 50);
         assert_eq!(format_hex(s.device_color()), "#804020");
         assert_eq!(format_hex(s.color), "#ff8040");
+    }
+
+    #[test]
+    fn brightness_uses_intensity_for_colourless_effects() {
+        let cycle = state(EffectKind::Cycle, "#ffffff", 50, 20).device_params();
+        assert_eq!(cycle.intensity, 20);
+        let wave = state(EffectKind::Wave, "#ffffff", 50, 100).device_params();
+        assert_eq!(wave.intensity, 100);
+        // Breathe has a colour: the colour is dimmed and intensity stays full.
+        let breathe = state(EffectKind::Breathe, "#ffffff", 50, 20).device_params();
+        assert_eq!((format_hex(breathe.color), breathe.intensity), ("#333333".into(), 100));
     }
 
     #[test]

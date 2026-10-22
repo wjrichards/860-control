@@ -7,7 +7,7 @@ use std::path::Path;
 use g512_hidpp::{
     Device, Hidraw,
     discovery::{SYSFS_HIDRAW, find_lighting_interface},
-    effects::{self, EffectKind, Rgb},
+    effects::{self, EffectKind, EffectParams, Rgb},
     info,
 };
 
@@ -24,5 +24,6 @@ fn sets_static_green_on_real_keyboard() {
     eprintln!("{} on {}, firmware {}", info.name, path.display(), info.application_firmware().unwrap());
 
     let lighting = effects::discover(&mut dev).unwrap();
-    effects::set_effect(&mut dev, &lighting.zones[0], EffectKind::Static, Rgb::new(0, 0xff, 0), 0).unwrap();
+    let green = EffectParams { color: Rgb::new(0, 0xff, 0), ..Default::default() };
+    effects::set_effect(&mut dev, &lighting.zones[0], EffectKind::Static, &green).unwrap();
 }

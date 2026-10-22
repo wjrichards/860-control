@@ -61,3 +61,7 @@ All steps were accepted. The user reported that **every wave moved, a bigger wav
 | Ripple | 6 | `R G B 00 p_hi p_lo` | yes | u16 period, bigger = slower | 10–1000 |
 
 The ranges the service offers stay within these tested values: Breathe and Cycle 1000–8000, Wave 10–250, Ripple 10–1000. Wave direction is fixed at 1, the only value tested.
+
+## Spike 4 (`spike4_intensity.py`)
+
+The user reported that **intensity 20 was visibly dimmer than 100 for both Cycle and Wave**. The script's replies were not saved (no `spike4-out.txt`), so the device's acknowledgements weren't recorded. The visual result means both requests took effect. `g512d` uses the intensity byte for brightness on Cycle and Wave.

@@ -56,7 +56,9 @@ The service publishes per-effect parameters. All of them were confirmed by watch
 | Wave | `0x0004` | no | u8 speed | 10–250 |
 | Ripple | `0x000b` | yes | u16 period | 10–1000 |
 
-The ranges stay inside the values tested on the keyboard. Wave direction is fixed at 1. Users see speed as a percentage, where 100 is the fastest. The service maps it geometrically onto the effect's range, because equal steps in the raw value feel uneven. The raw value never reaches the UI.
+The ranges stay inside the values tested on the keyboard. Wave direction is fixed at 1.
+
+Brightness dims the colour for Static, Breathe and Ripple. For Cycle and Wave, which take no colour, it is sent as the intensity byte (1–100). Spike 4 confirmed that intensity 20 is visibly dimmer than 100 for both. Users see speed as a percentage, where 100 is the fastest. The service maps it geometrically onto the effect's range, because equal steps in the raw value feel uneven. The raw value never reaches the UI.
 
 ### Service: zbus, async, user systemd unit
 - **D-Bus:** pure-Rust `zbus` on a single async runtime. Well-known name `io.github.g512control.Lighting1`, object `/io/github/g512control/Lighting1`, interface `io.github.g512control.Lighting1`.

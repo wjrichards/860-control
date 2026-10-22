@@ -74,6 +74,11 @@ impl EffectKind {
         matches!(self, EffectKind::Static | EffectKind::Breathe | EffectKind::Ripple)
     }
 
+    /// Whether the effect has an intensity (brightness) value.
+    pub const fn has_intensity(self) -> bool {
+        matches!(self, EffectKind::Breathe | EffectKind::Cycle | EffectKind::Wave)
+    }
+
     /// The speed values the effect accepts, as tested on the keyboard
     /// (firmware U1 19.01). Bigger is slower. `None` for effects without speed.
     pub const fn speed_range(self) -> Option<RangeInclusive<u16>> {
@@ -166,26 +171,46 @@ pub fn discover<T: Transport>(dev: &mut Device<T>) -> Result<LightingInfo> {
     })
 }
 
+/// What an effect is drawn with. Each effect uses only the fields it accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectParams {
+    pub color: Rgb,
+    /// Device speed value; see [`EffectKind::speed_range`].
+    pub speed: u16,
+    /// 1–100; dims Breathe, Cycle and Wave (20 and 100 confirmed on the keyboard).
+    pub intensity: u8,
+}
+
+impl Default for EffectParams {
+    fn default() -> Self {
+        EffectParams { color: Rgb::default(), speed: 0, intensity: INTENSITY_FULL }
+    }
+}
+
 /// The 10-byte `setZoneEffect` parameter block for `kind`.
 ///
-/// `color` is ignored by effects without a colour and `speed` by effects
-/// without a speed; a speed outside [`EffectKind::speed_range`] is rejected.
-pub fn parameter_block(kind: EffectKind, color: Rgb, speed: u16) -> Result<[u8; 10]> {
+/// Fields an effect does not use are ignored; a speed outside
+/// [`EffectKind::speed_range`] or an intensity outside 1–100 is rejected.
+pub fn parameter_block(kind: EffectKind, p: &EffectParams) -> Result<[u8; 10]> {
     if let Some(range) = kind.speed_range()
-        && !range.contains(&speed)
+        && !range.contains(&p.speed)
     {
-        return Err(Error::OutOfRange { kind, value: speed });
+        return Err(Error::OutOfRange { kind, what: "speed", value: p.speed });
     }
-    let Rgb { r, g, b } = color;
-    let [s_hi, s_lo] = speed.to_be_bytes();
+    if kind.has_intensity() && !(1..=INTENSITY_FULL).contains(&p.intensity) {
+        return Err(Error::OutOfRange { kind, what: "intensity", value: p.intensity.into() });
+    }
+    let Rgb { r, g, b } = p.color;
+    let [s_hi, s_lo] = p.speed.to_be_bytes();
+    let i = p.intensity;
     let mut block = [0u8; 10];
     let used: &[u8] = match kind {
         EffectKind::Off => &[],
         EffectKind::Static => &[r, g, b, 0],
-        EffectKind::Breathe => &[r, g, b, s_hi, s_lo, 0, INTENSITY_FULL],
-        EffectKind::Cycle => &[0, 0, 0, 0, 0, s_hi, s_lo, INTENSITY_FULL],
+        EffectKind::Breathe => &[r, g, b, s_hi, s_lo, 0, i],
+        EffectKind::Cycle => &[0, 0, 0, 0, 0, s_hi, s_lo, i],
         // Wave takes a one-byte speed; a big-endian period here is rejected.
-        EffectKind::Wave => &[0, 0, 0, 0, 0, 0, s_lo, 0, WAVE_DIRECTION, INTENSITY_FULL],
+        EffectKind::Wave => &[0, 0, 0, 0, 0, 0, s_lo, 0, WAVE_DIRECTION, i],
         EffectKind::Ripple => &[r, g, b, 0, s_hi, s_lo],
     };
     block[..used.len()].copy_from_slice(used);
@@ -194,15 +219,9 @@ pub fn parameter_block(kind: EffectKind, color: Rgb, speed: u16) -> Result<[u8; 
 
 /// Apply `kind` to `zone` (RAM only). Succeeds only once the device has
 /// acknowledged the request.
-pub fn set_effect<T: Transport>(
-    dev: &mut Device<T>,
-    zone: &Zone,
-    kind: EffectKind,
-    color: Rgb,
-    speed: u16,
-) -> Result<()> {
+pub fn set_effect<T: Transport>(dev: &mut Device<T>, zone: &Zone, kind: EffectKind, p: &EffectParams) -> Result<()> {
     let effect = zone.find(kind).ok_or(Error::EffectUnavailable(kind))?;
-    let block = parameter_block(kind, color, speed)?;
+    let block = parameter_block(kind, p)?;
     let mut params = [0u8; 13];
     params[0] = zone.index;
     params[1] = effect.index;
@@ -221,51 +240,70 @@ mod tests {
         s.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect()
     }
 
+    fn params(color: Rgb, speed: u16, intensity: u8) -> EffectParams {
+        EffectParams { color, speed, intensity }
+    }
+
     /// Apply one effect to the fake and return the 13 parameter bytes sent.
-    fn applied_params(kind: EffectKind, color: Rgb, speed: u16) -> Vec<u8> {
+    fn applied_params(kind: EffectKind, p: EffectParams) -> Vec<u8> {
         let mut dev = Device::open(FakeKeyboard::g512()).unwrap();
         let zone = discover(&mut dev).unwrap().zones.remove(0);
-        set_effect(&mut dev, &zone, kind, color, speed).unwrap();
+        set_effect(&mut dev, &zone, kind, &p).unwrap();
         dev.transport_mut().applied.last().unwrap()[..13].to_vec()
     }
 
     // Expected bytes are the `sent` lines (after `11 ff 0d 3a`) of requests
     // the keyboard accepted and the user confirmed visually: spike-out.txt,
-    // spike2-out.txt, spike3-out.txt.
+    // spike2-out.txt, spike3-out.txt, and spike 4 (intensity 20, whose
+    // replies were not saved).
     #[test]
     fn bytes_match_confirmed_requests() {
+        let none = Rgb::default();
         let cases = [
-            (EffectKind::Static, Rgb::new(0xff, 0, 0), 0, "00 01 ff 00 00 00 00 00 00 00 00 00 00"),
-            (EffectKind::Breathe, Rgb::new(0xff, 0, 0xff), 4000, "00 02 ff 00 ff 0f a0 00 64 00 00 00 00"),
-            (EffectKind::Breathe, Rgb::new(0xff, 0xff, 0xff), 8000, "00 02 ff ff ff 1f 40 00 64 00 00 00 00"),
-            (EffectKind::Cycle, Rgb::default(), 8000, "00 03 00 00 00 00 00 1f 40 64 00 00 00"),
-            (EffectKind::Wave, Rgb::default(), 30, "00 04 00 00 00 00 00 00 1e 00 01 64 00"),
-            (EffectKind::Wave, Rgb::default(), 250, "00 04 00 00 00 00 00 00 fa 00 01 64 00"),
-            (EffectKind::Ripple, Rgb::new(0, 0xff, 0xff), 1000, "00 06 00 ff ff 00 03 e8 00 00 00 00 00"),
-            (EffectKind::Off, Rgb::default(), 0, "00 00 00 00 00 00 00 00 00 00 00 00 00"),
+            (EffectKind::Static, params(Rgb::new(0xff, 0, 0), 0, 100), "00 01 ff 00 00 00 00 00 00 00 00 00 00"),
+            (EffectKind::Breathe, params(Rgb::new(0xff, 0, 0xff), 4000, 100), "00 02 ff 00 ff 0f a0 00 64 00 00 00 00"),
+            (EffectKind::Breathe, params(Rgb::new(0xff, 0xff, 0xff), 8000, 100), "00 02 ff ff ff 1f 40 00 64 00 00 00 00"),
+            (EffectKind::Cycle, params(none, 8000, 100), "00 03 00 00 00 00 00 1f 40 64 00 00 00"),
+            (EffectKind::Cycle, params(none, 3000, 20), "00 03 00 00 00 00 00 0b b8 14 00 00 00"),
+            (EffectKind::Wave, params(none, 30, 100), "00 04 00 00 00 00 00 00 1e 00 01 64 00"),
+            (EffectKind::Wave, params(none, 30, 20), "00 04 00 00 00 00 00 00 1e 00 01 14 00"),
+            (EffectKind::Wave, params(none, 250, 100), "00 04 00 00 00 00 00 00 fa 00 01 64 00"),
+            (EffectKind::Ripple, params(Rgb::new(0, 0xff, 0xff), 1000, 100), "00 06 00 ff ff 00 03 e8 00 00 00 00 00"),
+            (EffectKind::Off, EffectParams::default(), "00 00 00 00 00 00 00 00 00 00 00 00 00"),
         ];
-        for (kind, color, speed, expected) in cases {
-            assert_eq!(applied_params(kind, color, speed), hex(expected), "{kind:?} speed {speed}");
+        for (kind, p, expected) in cases {
+            assert_eq!(applied_params(kind, p), hex(expected), "{kind:?} {p:?}");
         }
     }
 
     #[test]
-    fn colour_ignored_where_not_accepted() {
-        let with = applied_params(EffectKind::Cycle, Rgb::new(1, 2, 3), 1000);
-        let without = applied_params(EffectKind::Cycle, Rgb::default(), 1000);
+    fn unused_fields_ignored() {
+        let with = applied_params(EffectKind::Cycle, params(Rgb::new(1, 2, 3), 1000, 100));
+        let without = applied_params(EffectKind::Cycle, params(Rgb::default(), 1000, 100));
         assert_eq!(with, without);
+        // Static and Ripple have no intensity, so any value (even 0) is ignored.
+        let a = applied_params(EffectKind::Ripple, params(Rgb::new(0, 0xff, 0xff), 30, 0));
+        let b = applied_params(EffectKind::Ripple, params(Rgb::new(0, 0xff, 0xff), 30, 100));
+        assert_eq!(a, b);
     }
 
     #[test]
-    fn speed_outside_tested_range_rejected_before_sending() {
+    fn out_of_range_values_rejected_before_sending() {
         let mut dev = Device::open(FakeKeyboard::g512()).unwrap();
         let zone = discover(&mut dev).unwrap().zones.remove(0);
         let sent = dev.transport_mut().sent().len();
-        for (kind, speed) in [(EffectKind::Wave, 251), (EffectKind::Breathe, 999), (EffectKind::Ripple, 1001)] {
-            assert!(matches!(
-                set_effect(&mut dev, &zone, kind, Rgb::default(), speed),
-                Err(Error::OutOfRange { .. })
-            ));
+        let cases = [
+            (EffectKind::Wave, params(Rgb::default(), 251, 100), "speed"),
+            (EffectKind::Breathe, params(Rgb::default(), 999, 100), "speed"),
+            (EffectKind::Ripple, params(Rgb::default(), 1001, 100), "speed"),
+            (EffectKind::Cycle, params(Rgb::default(), 1000, 0), "intensity"),
+            (EffectKind::Wave, params(Rgb::default(), 30, 101), "intensity"),
+        ];
+        for (kind, p, field) in cases {
+            match set_effect(&mut dev, &zone, kind, &p) {
+                Err(Error::OutOfRange { what, .. }) => assert_eq!(what, field),
+                other => panic!("{kind:?} {p:?}: {other:?}"),
+            }
         }
         assert_eq!(dev.transport_mut().sent().len(), sent);
     }
@@ -277,7 +315,7 @@ mod tests {
         let mut dev = Device::open(fake).unwrap();
         let zone = discover(&mut dev).unwrap().zones.remove(0);
         assert!(matches!(
-            set_effect(&mut dev, &zone, EffectKind::Static, Rgb::new(0xff, 0, 0), 0),
+            set_effect(&mut dev, &zone, EffectKind::Static, &params(Rgb::new(0xff, 0, 0), 0, 100)),
             Err(Error::Hidpp { code: 0x02, .. })
         ));
         assert!(dev.transport_mut().applied.is_empty());
@@ -289,7 +327,7 @@ mod tests {
         let mut zone = discover(&mut dev).unwrap().zones.remove(0);
         zone.effects.retain(|e| e.kind != Some(EffectKind::Ripple));
         assert!(matches!(
-            set_effect(&mut dev, &zone, EffectKind::Ripple, Rgb::default(), 30),
+            set_effect(&mut dev, &zone, EffectKind::Ripple, &params(Rgb::default(), 30, 100)),
             Err(Error::EffectUnavailable(EffectKind::Ripple))
         ));
     }
