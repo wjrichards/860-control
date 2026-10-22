@@ -1,0 +1,15 @@
+[package]
+name = "g512-control"
+description = "GNOME app for choosing the G512 keyboard's lighting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Built inside the GNOME 50 Flatpak SDK; the host has no GTK development
+# files, which is why this crate is not in the workspace's default-members.
+[dependencies]
+adw = { version = "0.9.2", package = "libadwaita", features = ["v1_6"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+gtk = { version = "0.11", package = "gtk4", features = ["v4_14"] }
+zbus = "5.13.2"

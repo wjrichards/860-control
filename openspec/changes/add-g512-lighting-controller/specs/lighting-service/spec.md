@@ -51,12 +51,16 @@ A lighting state SHALL consist of an effect, an RGB colour, a speed, and a brigh
 - **WHEN** a front end sets an effect that the connected device did not report
 - **THEN** the call fails with an invalid-argument error and the keyboard is unchanged
 
-### Requirement: Brightness by colour scaling
-The device has no brightness feature, so the service SHALL apply brightness by scaling each colour channel it sends by the brightness percentage. Brightness 0 SHALL turn the lighting off. Changing brightness SHALL NOT change the stored colour.
+### Requirement: Brightness without a brightness feature
+The device has no brightness feature. For effects that take a colour, the service SHALL apply brightness by scaling each colour channel it sends by the brightness percentage. For effects without a colour (Cycle, Wave), it SHALL send the brightness percentage as the effect's intensity value. Brightness 0 SHALL turn the lighting off. Changing brightness SHALL NOT change the stored colour.
 
 #### Scenario: Half brightness
 - **WHEN** the state is Static, colour `#FF8040`, brightness 50
 - **THEN** the colour sent to the keyboard is `#804020` (each channel scaled by 0.5 and rounded) and the stored colour remains `#FF8040`
+
+#### Scenario: Dimmed colour cycle
+- **WHEN** the state is Cycle with brightness 20
+- **THEN** the cycle is sent with intensity 20 and is visibly dimmer than at brightness 100
 
 ### Requirement: Persisted lighting state
 The service SHALL save the last successfully applied lighting state to the user's configuration directory and SHALL apply it when the service starts and the keyboard is connected. With no saved state, the service SHALL leave the keyboard as it is.

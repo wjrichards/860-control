@@ -1,0 +1,14 @@
+[package]
+name = "g512-hidpp"
+description = "HID++ 2.0 lighting protocol for the Logitech G512 RGB keyboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# In-memory keyboard for tests in this and dependent crates.
+fake = []
+
+[dependencies]
+libc = "0.2.191"

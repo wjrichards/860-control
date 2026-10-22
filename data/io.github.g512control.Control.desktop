@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=G512 Control
+Comment=Set the lighting of a Logitech G512 keyboard
+Exec=g512-control
+Icon=io.github.g512control.Control
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;GTK;GNOME;
+Keywords=keyboard;rgb;lighting;backlight;logitech;g512;
+StartupNotify=true
