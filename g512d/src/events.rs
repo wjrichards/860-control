@@ -95,7 +95,8 @@ fn reapply_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
         }
     }
     if !done {
-        eprintln!("could not re-apply saved state after {ATTEMPTS} attempts");
+        let status = ctl.lock().unwrap_or_else(|e| e.into_inner()).status();
+        eprintln!("could not re-apply saved state after {ATTEMPTS} attempts (keyboard {})", status.as_str());
     }
     notify(conn);
 }
