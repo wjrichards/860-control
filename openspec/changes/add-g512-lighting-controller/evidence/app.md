@@ -47,3 +47,16 @@ The user dragged **Speed** (same throttle as Brightness):
 - **Final value:** 52. The service `State` is `"Ripple" 154 153 150 52 100`, and the app's Speed slider shows 52.0.
 
 Still open for 4.4: the toast and rollback when the service rejects an update.
+
+## Stand-in run 2, with the user's OK (2026-10-22)
+
+`g512d` was masked (`--runtime`) and stopped for about a minute, then unmasked and restarted. Afterwards it was `connected` and had re-applied the user's saved state (`"Ripple" 61 56 70 52 82`).
+
+- **Unsupported (4.2):** the stand-in reported `unsupported` → "Keyboard Not Supported" page.
+- **Rejected update (4.4):** the stand-in reported a connected "Fake G512" with brightness 77 and rejected every SetState with InvalidArgs. Setting Brightness 30 through the app produced:
+  - a toast labelled `rejected by the test service`;
+  - the slider back at **77.0**, the stand-in's state.
+
+So 4.4 is fully covered: throttled live apply on a real drag, external changes shown without being echoed back, and toast plus rollback on rejection.
+
+For 4.2, the disconnected and permission-denied pages were shown through the stand-in reporting those states. They were not shown by removing the udev rule or unplugging the keyboard while the app was open. The real service reports those states correctly (3.4); the app reads the same property.
