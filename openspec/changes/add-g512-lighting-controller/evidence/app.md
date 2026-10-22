@@ -46,7 +46,7 @@ The user dragged **Speed** (same throttle as Brightness):
 - **Further small moves:** 9 more calls in pairs or threes, also about 100 ms apart.
 - **Final value:** 52. The service `State` is `"Ripple" 154 153 150 52 100`, and the app's Speed slider shows 52.0.
 
-Still open for 4.4: the toast and rollback when the service rejects an update.
+Still open for 4.4 at this point: the toast and rollback when the service rejects an update (closed in stand-in run 2 below).
 
 ## Stand-in run 2, with the user's OK (2026-10-22)
 
