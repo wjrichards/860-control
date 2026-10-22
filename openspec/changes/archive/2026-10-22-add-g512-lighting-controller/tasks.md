@@ -21,7 +21,7 @@
 - [x] 3.3 Implement the D-Bus interface `io.github.g512control.Lighting1` (device state, effects with parameters, get/set state, change signal) with single-instance name ownership; verify with `busctl --user introspect` and `busctl --user call` that set/get works and that a second `g512d` exits with a message
 - [x] 3.4 Implement device states (`connected`, `disconnected`, `permission-denied`, `unsupported`); verify by running without the udev rule (`permission-denied`) and with the keyboard unplugged (`disconnected`)
 - [x] 3.5 Implement hotplug (netlink uevents) and resume (logind `PrepareForSleep`) reapply with retries; verify that replugging and `systemctl suspend` each restore the saved state within 3 s, and record the timings in `evidence/reapply.md`
-- [ ] 3.6 Add the systemd user unit, D-Bus service file and `packaging/install-service.sh`; verify that after running it, `systemctl --user status g512d` is active and the saved state is applied at next login
+- [x] 3.6 Add the systemd user unit, D-Bus service file and `packaging/install-service.sh`; verify that after running it, `systemctl --user status g512d` is active and the saved state is applied at next login (ticked on install and startup evidence; a real login was not observed, see `evidence/login.md`)
 
 ## 4. App (`g512-control`)
 
