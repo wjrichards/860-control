@@ -1,0 +1,38 @@
+device: /dev/hidraw1
+
+== ColorLedEffects (0x8070) at slot 0x0d
+getInfo raw: 01 00 01 00 07 00 00 00 00 00 00 00 00 00 00 00
+  zones=1  nvCapabilities=0x0001 (bits 0)  extCapabilities=0x0007 (bits 0,1,2)
+
+  zone 0: raw 00 00 01 07 00 00 00 00 00 00 00 00 00 00 00 00
+    location=0x0001 (Primary)  effects=7
+      #      id    caps  period  name / raw
+      0  0x0000  0x0000       0  Disabled  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+      1  0x0001  0x0005       0  Static    00 01 00 01 00 05 00 00 00 00 00 00 00 00 00 00
+      2  0x000a  0xc001     992  Breathe   00 02 00 0a c0 01 03 e0 00 00 00 00 00 00 00 00
+      3  0x0003  0xc001     992  Cycle     00 03 00 03 c0 01 03 e0 00 00 00 00 00 00 00 00
+      4  0x0004  0xdce1      30  ?         00 04 00 04 dc e1 00 1e 00 00 00 00 00 00 00 00
+      5  0x0005  0x0000       0  ?         00 05 00 05 00 00 00 00 00 00 00 00 00 00 00 00
+      6  0x000b  0xdce1      30  Ripple    00 06 00 0b dc e1 00 1e 00 00 00 00 00 00 00 00
+
+== PerKeyLighting (0x8080) at slot 0x0c: getInfo(type, page)
+  type=0 page=0: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+    if bytes 2.. are a key-ID bitmap: 2 IDs set, first [16, 33]
+  type=0 page=1: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+    if bytes 2.. are a key-ID bitmap: 2 IDs set, first [16, 33]
+  type=0 page=2: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+    if bytes 2.. are a key-ID bitmap: 2 IDs set, first [16, 33]
+  type=0 page=3: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+    if bytes 2.. are a key-ID bitmap: 2 IDs set, first [16, 33]
+  type=1 page=0: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=1 page=1: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=1 page=2: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=1 page=3: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=2 page=0: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=2 page=1: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=2 page=2: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=2 page=3: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=3 page=0: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=3 page=1: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=3 page=2: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00
+  type=3 page=3: 00 41 00 00 01 00 02 00 00 00 00 00 00 00 00 00

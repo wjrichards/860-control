@@ -1,0 +1,5 @@
+/target/
+/.claude/worktrees/
+/.flatpak-builder/
+/build-dir/
+__pycache__/
