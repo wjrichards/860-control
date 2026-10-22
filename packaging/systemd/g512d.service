@@ -1,0 +1,14 @@
+[Unit]
+Description=Logitech G512 keyboard lighting service
+After=dbus.socket
+
+[Service]
+Type=dbus
+BusName=io.github.g512control.Lighting1
+ExecStart=%h/.local/bin/g512d
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

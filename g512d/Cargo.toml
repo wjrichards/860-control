@@ -8,3 +8,10 @@ rust-version.workspace = true
 
 [dependencies]
 g512-hidpp = { path = "../g512-hidpp" }
+libc = "0.2.191"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+zbus = "5.13.2"
+
+[dev-dependencies]
+g512-hidpp = { path = "../g512-hidpp", features = ["fake"] }
