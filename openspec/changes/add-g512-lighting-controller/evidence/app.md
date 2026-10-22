@@ -64,3 +64,9 @@ For 4.2, the disconnected and permission-denied pages were shown through the sta
 ## 4.3 Hands-on effect pass (user, 2026-10-22, after the fresh install)
 
 The user selected every effect in the Effect list of the freshly installed app: Off, Static, Breathe, Colour cycle, Wave and Ripple. The keyboard followed each choice, and the Colour and Speed rows showed and hid correctly for each effect, including the spec's Cycle and Static scenarios. This adds a check by eye to the AT-SPI checks above.
+
+## 4.5 GNOME conventions (2026-10-22)
+
+- **Accessible names:** the AT-SPI dump of the installed app (see `install.md`) names every control: combo box `Effect`, button `Colour` (with its colour described as `Red 24%, Green 22%, Blue 27%`), slider `Speed`, slider `Brightness`, and button `Close`. Each slider also exposes its value.
+- **Keyboard only (user):** the whole app works with Tab, the arrow keys, Space and Enter.
+- **System style (user):** switching Light/Dark and changing the accent colour in Settings changed the running app straight away, with no restart.
