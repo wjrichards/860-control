@@ -2,10 +2,10 @@
 
 ## 1. Protocol: per-key frames
 
-- [ ] 1.1 Add `Device::request_very_long` (report `0x12`, 60 parameter bytes), sharing reply matching with `request`; verify with unit tests against a scripted transport: the sent bytes are a 64-byte `12 ff <slot> <fn|sw> …` report, and both `0x11` and `0x12` replies match
-- [ ] 1.2 Add `g512_hidpp::perkey`: `KeyId` (ANSI 104 set, `KeyId::ALL`, `KeyId::new` rejects others such as `0x64`) and `Frame`; verify with unit tests: there are 104 IDs, `0xe0` is accepted and `0x64` and `0x00` are rejected
-- [ ] 1.3 Implement `send_frame` (8 × function 3 with header `00 01 00 0e`, then function 5 commit; fails on the first HID++ error or timeout); verify that unit tests reproduce spike 5's exact bytes for the all-blue frame and the single Left Ctrl frame
-- [ ] 1.4 Extend `FakeKeyboard` to accept `0x8080` functions 3 and 5, record committed frames, and reject any other `0x8080` function; verify with a test that `send_frame` on the fake records the frame and that a call to `0x8080` function 1 fails
+- [x] 1.1 Add `Device::request_very_long` (report `0x12`, 60 parameter bytes), sharing reply matching with `request`; verify with unit tests against a scripted transport: the sent bytes are a 64-byte `12 ff <slot> <fn|sw> …` report, and both `0x11` and `0x12` replies match
+- [x] 1.2 Add `g512_hidpp::perkey`: `KeyId` (ANSI 104 set, `KeyId::ALL`, `KeyId::new` rejects others such as `0x64`) and `Frame`; verify with unit tests: there are 104 IDs, `0xe0` is accepted and `0x64` and `0x00` are rejected
+- [x] 1.3 Implement `send_frame` (8 × function 3 with header `00 01 00 0e`, then function 5 commit; fails on the first HID++ error or timeout); verify that unit tests reproduce spike 5's exact bytes for the all-blue frame and the single Left Ctrl frame
+- [x] 1.4 Extend `FakeKeyboard` to accept `0x8080` functions 3 and 5, record committed frames, and reject any other `0x8080` function; verify with a test that `send_frame` on the fake records the frame and that a call to `0x8080` function 1 fails
 - [ ] 1.5 Add an ignored hardware test that sends a frame (WASD red, the rest dim white) to the real keyboard; verify by running `cargo test -p g512-hidpp -- --ignored` with the user watching
 
 ## 2. Service: Custom effect, key maps, corrections

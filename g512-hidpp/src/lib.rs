@@ -11,9 +11,10 @@ mod error;
 pub mod fake;
 mod feature;
 pub mod info;
+pub mod perkey;
 mod transport;
 
-pub use device::{DEVICE_INDEX, Device, REPLY_TIMEOUT};
+pub use device::{DEVICE_INDEX, Device, REPLY_TIMEOUT, VERY_LONG_PARAMS};
 pub use error::{Error, Result};
 pub use feature::Feature;
 pub use transport::{Hidraw, Transport};
