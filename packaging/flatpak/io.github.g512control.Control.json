@@ -1,0 +1,43 @@
+{
+    "id": "io.github.g512control.Control",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "50",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+    "command": "g512-control",
+    "finish-args": [
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--share=ipc",
+        "--device=dri",
+        "--talk-name=io.github.g512control.Lighting1"
+    ],
+    "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin",
+        "env": {
+            "CARGO_HOME": "/run/build/g512-control/cargo",
+            "CARGO_TARGET_DIR": "/run/build/g512-control/target"
+        },
+        "build-args": ["--share=network"]
+    },
+    "modules": [
+        {
+            "name": "g512-control",
+            "buildsystem": "simple",
+            "build-commands": [
+                "cargo build --release --locked -p g512-control",
+                "install -Dm0755 target/release/g512-control /app/bin/g512-control",
+                "install -Dm0644 data/io.github.g512control.Control.desktop /app/share/applications/io.github.g512control.Control.desktop",
+                "install -Dm0644 data/io.github.g512control.Control.metainfo.xml /app/share/metainfo/io.github.g512control.Control.metainfo.xml",
+                "install -Dm0644 data/io.github.g512control.Control.svg /app/share/icons/hicolor/scalable/apps/io.github.g512control.Control.svg"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "../..",
+                    "skip": ["target", ".flatpak-builder", "build-dir", ".git", ".claude", "openspec"]
+                }
+            ]
+        }
+    ]
+}

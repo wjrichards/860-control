@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.g512control.Control</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>G512 Control</name>
+  <summary>Set the lighting of a Logitech G512 keyboard</summary>
+  <description>
+    <p>
+      Choose the G512 RGB keyboard's lighting effect, colour, speed and brightness.
+      The app talks to the g512d lighting service, which owns the keyboard and keeps
+      the lighting after replugs and suspend.
+    </p>
+  </description>
+  <developer id="io.github.g512control">
+    <name>wrichards</name>
+  </developer>
+  <launchable type="desktop-id">io.github.g512control.Control.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <recommends>
+    <control>keyboard</control>
+  </recommends>
+  <supports>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <releases>
+    <release version="0.1.0" date="2026-10-22"/>
+  </releases>
+</component>
