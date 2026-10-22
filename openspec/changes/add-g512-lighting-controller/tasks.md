@@ -33,5 +33,5 @@
 
 ## 5. Wrap-up
 
-- [ ] 5.1 Write README (install service + udev rule + Flatpak, uninstall/rollback, "don't run alongside OpenRGB/g810-led"); verify a fresh install following only the README works on this machine
+- [x] 5.1 Write README (install service + udev rule + Flatpak, uninstall/rollback, "don't run alongside OpenRGB/g810-led"); verify a fresh install following only the README works on this machine
 - [x] 5.2 Run `cargo clippy --workspace -- -D warnings`, `cargo test --workspace` and `openspec validate add-g512-lighting-controller --strict`; verify all pass
