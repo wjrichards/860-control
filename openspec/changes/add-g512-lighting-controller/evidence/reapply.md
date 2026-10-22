@@ -52,3 +52,12 @@ This is the expected result with no device access. The service stays up and repo
 
 - **`permission-denied`:** after the rule was removed and the keyboard re-enumerated, `busctl --user get-property ... DeviceState` returned `"permission-denied"`. A freshly started `g512d` (02:27:49) reported the same, and the install script printed the udev install hint.
 - **`disconnected`:** during the 02:02:21–02:02:29 re-enumeration, `g512d` logged `disconnected` 86 ms after the kernel disconnect, and `connected` once the node returned. The D-Bus property wasn't sampled inside that window. It is computed from the same state the log line reports.
+
+## Rule restored, 2026-10-22
+
+The user put the rule back and re-enumerated the keyboard. The ACL now gives `user:wrichards:rw-` again. Both re-enumerations logged the explicit success line:
+
+| Kernel `hidraw1` created | g512d `re-applied saved state (attempt 1)` | Delay |
+|---|---|---|
+| 02:30:10.027 | 02:30:10.556 | 0.53 s |
+| 02:30:28.465 | 02:30:28.992 | 0.53 s |
