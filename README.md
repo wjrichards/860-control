@@ -74,7 +74,7 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 - **Don't run it alongside OpenRGB, g810-led or another lighting tool.** They write to the same keyboard and will overwrite each other.
 - **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects and PerKeyLighting. The keyboard also has firmware-update, reset and hidden engineering features, which the code cannot address.
 - **Lighting is written to the keyboard's RAM only,** never to its stored settings.
-- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/add-g512-lighting-controller/evidence/`, or `openspec/changes/archive/` once the change is archived.
+- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`.
 
 ## Development
 
