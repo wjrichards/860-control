@@ -83,14 +83,19 @@ impl UeventSocket {
 
 /// Re-apply the saved state with retries, then publish the result.
 fn reapply_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
+    let mut done = false;
     for attempt in 1..=ATTEMPTS {
-        let done = ctl.lock().unwrap_or_else(|e| e.into_inner()).reapply();
+        done = ctl.lock().unwrap_or_else(|e| e.into_inner()).reapply();
         if done {
+            eprintln!("re-applied saved state (attempt {attempt})");
             break;
         }
         if attempt < ATTEMPTS {
             thread::sleep(RETRY_DELAY);
         }
+    }
+    if !done {
+        eprintln!("could not re-apply saved state after {ATTEMPTS} attempts");
     }
     notify(conn);
 }
