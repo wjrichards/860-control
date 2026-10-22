@@ -27,7 +27,7 @@
 
 - [x] 4.1 Add the Flatpak manifest (`org.gnome.Platform//50`, Rust extension, `--talk-name` only, no `--device`); verify `flatpak run --command=ls io.github.g512control.Control /dev` shows no hidraw nodes and the app starts
 - [x] 4.2 Implement the D-Bus client and the status pages (service missing, `permission-denied` with the udev install command, `disconnected`, `unsupported`); verify each page appears by stopping the service, removing the rule, and unplugging the keyboard
-- [ ] 4.3 Implement the main page: effect row, colour row and speed row shown per the effect's parameters, and the brightness row; verify by selecting each effect that the controls match the spec's Cycle and Static scenarios
+- [x] 4.3 Implement the main page: effect row, colour row and speed row shown per the effect's parameters, and the brightness row; verify by selecting each effect that the controls match the spec's Cycle and Static scenarios
 - [x] 4.4 Implement live apply with 100 ms throttle and trailing send, toast and rollback on rejection, and following external change signals without echoing them back; verify by counting calls in `busctl --user monitor` while dragging brightness, and by setting Ripple with `busctl` while the app is open
 - [ ] 4.5 Check GNOME conventions: light/dark and accent follow the system, keyboard-only use works, and every control has an accessible name; verify by toggling dark style and accent in Settings, doing a full keyboard-only pass, and inspecting names with the GTK inspector (`GTK_DEBUG=interactive`)
 

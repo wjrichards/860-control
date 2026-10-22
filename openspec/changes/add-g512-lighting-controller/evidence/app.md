@@ -60,3 +60,7 @@ Still open for 4.4 at this point: the toast and rollback when the service reject
 So 4.4 is fully covered: throttled live apply on a real drag, external changes shown without being echoed back, and toast plus rollback on rejection.
 
 For 4.2, the disconnected and permission-denied pages were shown through the stand-in reporting those states. They were not shown by removing the udev rule or unplugging the keyboard while the app was open. The real service reports those states correctly (3.4); the app reads the same property.
+
+## 4.3 Hands-on effect pass (user, 2026-10-22, after the fresh install)
+
+The user selected every effect in the Effect list of the freshly installed app: Off, Static, Breathe, Colour cycle, Wave and Ripple. The keyboard followed each choice, and the Colour and Speed rows showed and hid correctly for each effect, including the spec's Cycle and Static scenarios. This adds a check by eye to the AT-SPI checks above.
