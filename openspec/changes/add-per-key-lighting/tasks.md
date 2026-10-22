@@ -10,17 +10,17 @@
 
 ## 2. Service: Custom effect, key maps, corrections
 
-- [ ] 2.1 Introduce `Effect { Zone(EffectKind), Custom }` in `state.rs`, with Custom offered only when PerKeyLighting resolved; verify with unit tests: name round-trip, `"Custom"` is rejected on a device without `0x8080`, and v1 effect names are unchanged
-- [ ] 2.2 Add `KeyMap` (key → Rgb) with the default Gaming map, and frame composition (map → brightness → correction, off for missing keys, rounding as v1); verify with unit tests for the spec scenarios "Custom at half brightness" (`#800000`) and "Left Ctrl evened out" (`#D9D9D9`)
-- [ ] 2.3 Load `corrections.toml` read-only at startup, ignoring bad entries with a warning; verify with unit tests: a valid file, an unknown key, a percentage of 0 or 150, and a missing file
-- [ ] 2.4 Extend `state.toml` with `game_switch`, `[custom]` and `[gaming]`, using serde defaults; verify with unit tests that a v1 file loads with defaults, that a round-trip keeps the maps, and that the Gaming map is written only after an edit
-- [ ] 2.5 Route every apply through one "what is due" function (zone effect, Custom frame, Gaming frame, Static as a frame when corrections exist); verify with `FakeOpener` tests for each branch, and that brightness 0 still sends zone Off
+- [x] 2.1 Introduce `Effect { Zone(EffectKind), Custom }` in `state.rs`, with Custom offered only when PerKeyLighting resolved; verify with unit tests: name round-trip, `"Custom"` is rejected on a device without `0x8080`, and v1 effect names are unchanged
+- [x] 2.2 Add `KeyMap` (key → Rgb) with the default Gaming map, and frame composition (map → brightness → correction, off for missing keys, rounding as v1); verify with unit tests for the spec scenarios "Custom at half brightness" (`#800000`) and "Left Ctrl evened out" (`#D9D9D9`)
+- [x] 2.3 Load `corrections.toml` read-only at startup, ignoring bad entries with a warning; verify with unit tests: a valid file, an unknown key, a percentage of 0 or 150, and a missing file
+- [x] 2.4 Extend `state.toml` with `game_switch`, `[custom]` and `[gaming]`, using serde defaults; verify with unit tests that a v1 file loads with defaults, that a round-trip keeps the maps, and that the Gaming map is written only after an edit
+- [x] 2.5 Route every apply through one "what is due" function (zone effect, Custom frame, Gaming frame, Static as a frame when corrections exist); verify with `FakeOpener` tests for each branch, and that brightness 0 still sends zone Off
 - [ ] 2.6 Add D-Bus members `CustomKeys`, `GamingKeys`, `SetKeys`, `GameSwitch`, `SetGameSwitch` and `GameActive`, with Custom in `Effects`; verify with `busctl --user introspect` and with `busctl` calls: `SetKeys custom` with WASD green while Custom is shown changes the keyboard, while `SetKeys gaming` with Static shown leaves the keyboard unchanged, and a v1-style `SetState Static 255 0 0 50 100` still works
 - [ ] 2.7 Hardware check: with `corrections.toml` set to `e0 = 85`, compare Static white sent as a frame against zone Static (switching back and forth); record whether they look the same in `evidence/`
 
 ## 3. Service: gaming layout while a game runs
 
-- [ ] 3.1 Add the GameMode watcher (session bus, no property caching, `NameHasOwner` before any read, re-reading `ClientCount` on `GameRegistered`, `GameUnregistered` and owner changes); verify with a unit test of the count → `game_override` state machine, including "SetState during a game clears it" and "switch off clears it"
+- [x] 3.1 Add the GameMode watcher (session bus, no property caching, `NameHasOwner` before any read, re-reading `ClientCount` on `GameRegistered`, `GameUnregistered` and owner changes); verify with a unit test of the count → `game_override` state machine, including "SetState during a game clears it" and "switch off clears it"
 - [ ] 3.2 Verify that GameMode is never activated: with `gamemoded` not running, start `g512d` and confirm with `busctl --user status com.feralinteractive.GameMode` that it is still not running after 30 s
 - [ ] 3.3 Verify the switch with `gamemode-simulate-game`: switch on and state Ripple → the Gaming map is shown within 1 s of the game registering, and Ripple is back within 1 s of it ending; switch off → no change; record timings from the journal in `evidence/`
 - [ ] 3.4 Verify replug and resume during a game: with `gamemode-simulate-game` running a long game (or a real game), re-enumerate the keyboard and confirm the Gaming map returns within 3 s

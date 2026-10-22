@@ -7,7 +7,8 @@ use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::{
     controller::{Controller, HidrawOpener, SetError},
-    state::{LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
+    keymap::{KeyMap, MapName},
+    state::{Effect, LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
 };
 
 pub const BUS_NAME: &str = "io.github.g512control.Lighting1";
@@ -16,8 +17,24 @@ pub const OBJECT_PATH: &str = "/io/github/g512control/Lighting1";
 pub type Shared = Arc<Mutex<Controller<HidrawOpener>>>;
 
 /// Shown before anything has been saved; not applied to the keyboard.
-const DEFAULT_STATE: LightingState =
-    LightingState { effect: EffectKind::Static, color: Rgb::new(0xff, 0xff, 0xff), speed: 50, brightness: 100 };
+const DEFAULT_STATE: LightingState = LightingState {
+    effect: Effect::Zone(EffectKind::Static),
+    color: Rgb::new(0xff, 0xff, 0xff),
+    speed: 50,
+    brightness: 100,
+};
+
+/// A key map as sent on the bus: (key usage, r, g, b), sorted by key.
+fn map_entries(map: &KeyMap) -> Vec<(u8, u8, u8, u8)> {
+    map.entries().map(|(k, c)| (k.usage(), c.r, c.g, c.b)).collect()
+}
+
+fn set_error(e: SetError) -> fdo::Error {
+    match e {
+        SetError::Invalid(e) => fdo::Error::InvalidArgs(e.to_string()),
+        SetError::Device(e) => fdo::Error::Failed(format!("keyboard refused the change: {e}")),
+    }
+}
 
 pub struct Lighting {
     pub ctl: Shared,
@@ -35,7 +52,11 @@ impl Lighting {
         self.firmware_changed(emitter).await?;
         self.effects_changed(emitter).await?;
         self.state_changed(emitter).await?;
-        self.pending_changed(emitter).await
+        self.pending_changed(emitter).await?;
+        self.custom_keys_changed(emitter).await?;
+        self.gaming_keys_changed(emitter).await?;
+        self.game_switch_changed(emitter).await?;
+        self.game_active_changed(emitter).await
     }
 }
 
@@ -67,10 +88,10 @@ impl Lighting {
         self.ctl()
             .offered()
             .into_iter()
-            .map(|k| {
-                let speed = k.speed_range().is_some();
+            .map(|e| {
+                let speed = e.has_speed();
                 let (min, max) = if speed { (SPEED_MIN, SPEED_MAX) } else { (0, 0) };
-                (k.name().to_string(), k.accepts_color(), speed, min, max)
+                (e.name().to_string(), e.accepts_color(), speed, min, max)
             })
             .collect()
     }
@@ -100,13 +121,58 @@ impl Lighting {
         let effect = effect_from_name(&effect).map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
         let state = LightingState { effect, color: Rgb::new(color.0, color.1, color.2), speed, brightness };
         let result = self.ctl().set_state(state);
-        let pending = match result {
-            Ok(pending) => pending,
-            Err(SetError::Invalid(e)) => return Err(fdo::Error::InvalidArgs(e.to_string())),
-            Err(SetError::Device(e)) => return Err(fdo::Error::Failed(format!("keyboard refused the change: {e}"))),
-        };
+        let pending = result.map_err(set_error)?;
         self.emit_all(&emitter).await?;
         Ok(pending)
+    }
+
+    /// The Custom key map: (key usage, r, g, b), sorted by key; keys not
+    /// listed are off.
+    #[zbus(property)]
+    async fn custom_keys(&self) -> Vec<(u8, u8, u8, u8)> {
+        map_entries(&self.ctl().settings().custom)
+    }
+
+    /// The Gaming key map, as `CustomKeys`.
+    #[zbus(property)]
+    async fn gaming_keys(&self) -> Vec<(u8, u8, u8, u8)> {
+        map_entries(&self.ctl().settings().gaming())
+    }
+
+    /// Replace the `"custom"` or `"gaming"` key map. Keys are USB HID usage
+    /// IDs from the ANSI 104-key set; each may appear once.
+    async fn set_keys(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        map: String,
+        keys: Vec<(u8, u8, u8, u8)>,
+    ) -> fdo::Result<()> {
+        let name = MapName::parse(&map)
+            .ok_or_else(|| fdo::Error::InvalidArgs(format!("unknown map {map:?}; use \"custom\" or \"gaming\"")))?;
+        let keys = KeyMap::from_entries(keys.into_iter().map(|(k, r, g, b)| (k, Rgb::new(r, g, b))))
+            .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        let result = self.ctl().set_keys(name, keys);
+        result.map_err(set_error)?;
+        self.emit_all(&emitter).await?;
+        Ok(())
+    }
+
+    /// Whether the Gaming map is shown while GameMode reports a game.
+    #[zbus(property)]
+    async fn game_switch(&self) -> bool {
+        self.ctl().settings().game_switch
+    }
+
+    async fn set_game_switch(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, on: bool) -> fdo::Result<()> {
+        self.ctl().set_game_switch(on);
+        self.emit_all(&emitter).await?;
+        Ok(())
+    }
+
+    /// True while the Gaming map is shown because a game is running.
+    #[zbus(property)]
+    async fn game_active(&self) -> bool {
+        self.ctl().game_active()
     }
 }
 
