@@ -2,7 +2,7 @@
 
 ## 1. Device access and protocol check
 
-- [ ] 1.1 Add `packaging/70-g512-control.rules` (rule from design.md) and an install note; after the user installs it and replugs, verify `getfacl /dev/hidraw1` lists the session user with `rw` and the mouse's hidraw nodes are unchanged
+- [x] 1.1 Add `packaging/70-g512-control.rules` (rule from design.md) and an install note; after the user installs it and replugs, verify `getfacl /dev/hidraw1` lists the session user with `rw` and the mouse's hidraw nodes are unchanged
 - [ ] 1.2 Write-command check: with a throwaway script, send `setZoneEffect` by hand for Static red, Breathe, Cycle, Wave (`0x0004`) and Ripple (RAM-only); record working byte layouts, which effects take a colour, and the usable period range in `evidence/set-zone-effect.md`; update design.md's effect table and the device-protocol spec if anything differs; verify by replugging that the keyboard returns to its default lighting
 
 ## 2. Protocol crate (`g512-hidpp`)

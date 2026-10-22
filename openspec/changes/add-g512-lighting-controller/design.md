@@ -42,22 +42,21 @@ Open the hidraw node and `read`/`write` 20-byte reports, as the probes do. Find 
 ### Lighting through ColorLedEffects only
 All v1 modes, Static included, are sent with `0x8070` `setZoneEffect` (function 3) on zone 0. The per-key feature is not used.
 - **Why:** the probe shows Static (`0x0001`) is offered as a zone effect, so a whole-keyboard colour needs no key map.
-- **Command layout:** taken from Solaar and libratbag, and **not yet tested on this unit**. Requests carry zone index, effect index, a 10-byte parameter block (colour R,G,B, then period as big-endian u16 for effects that use it), and a persistence byte. The persistence byte is sent as 0 (RAM only).
-- **Task 1.2 checks the layout first.** It is a hands-on test that sends Static red, then Breathe, by hand and records the byte layouts that actually work in `evidence/`. If the layout differs, it is fixed here before the protocol crate is written.
+- **Command layout (confirmed on this unit in task 1.2, see `evidence/set-zone-effect.md`):** zone index, effect **index** (position in the zone's list, not the effect ID), a 10-byte parameter block, and a persistence byte sent as 0 (RAM only). The block layout differs per effect. Notably, Wave takes a one-byte speed value, not a big-endian period; the big-endian form was rejected with error `0x02`.
 
 ### Effect parameters
-The service publishes per-effect parameters derived from the probe's capability bits, refined by task 1.2:
+The service publishes per-effect parameters. All of them were confirmed by watching the keyboard in task 1.2:
 
-| Effect | ID | Colour | Speed | Default period |
+| Effect | ID | Colour | Speed value | Range offered (bigger = slower) |
 |---|---|---|---|---|
-| Off | `0x0000` | no | no | — |
-| Static | `0x0001` | yes | no | — |
-| Breathe | `0x000a` | yes | yes | 992 |
-| Cycle | `0x0003` | no | yes | 992 |
-| Wave | `0x0004` | no | yes | 30 |
-| Ripple | `0x000b` | yes | yes | 30 |
+| Off | `0x0000` | no | — | — |
+| Static | `0x0001` | yes | — | — |
+| Breathe | `0x000a` | yes | u16 period | 1000–8000 |
+| Cycle | `0x0003` | no | u16 period | 1000–8000 |
+| Wave | `0x0004` | no | u8 speed | 10–250 |
+| Ripple | `0x000b` | yes | u16 period | 10–1000 |
 
-The name "Wave" for `0x0004` and Ripple accepting a colour are inferences, confirmed or corrected in task 1.2. The speed range offered to users is a percentage mapped onto a period range that task 1.2 finds by testing. The raw period never reaches the UI.
+The ranges stay inside the values tested on the keyboard. Wave direction is fixed at 1. Users see speed as a percentage, where 100 is the fastest. The service maps it geometrically onto the effect's range, because equal steps in the raw value feel uneven. The raw value never reaches the UI.
 
 ### Service: zbus, async, user systemd unit
 - **D-Bus:** pure-Rust `zbus` on a single async runtime. Well-known name `io.github.g512control.Lighting1`, object `/io/github/g512control/Lighting1`, interface `io.github.g512control.Lighting1`.

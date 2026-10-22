@@ -1,6 +1,6 @@
 use std::{fmt, io};
 
-use crate::Feature;
+use crate::{Feature, effects::EffectKind};
 
 #[derive(Debug)]
 pub enum Error {
@@ -11,6 +11,10 @@ pub enum Error {
     Hidpp { feature: Feature, function: u8, code: u8 },
     /// The device does not implement this feature.
     FeatureMissing(Feature),
+    /// The zone does not offer this effect.
+    EffectUnavailable(EffectKind),
+    /// A speed value outside the range tested on the keyboard.
+    OutOfRange { kind: EffectKind, value: u16 },
     /// The device replied with data this crate cannot interpret.
     Protocol(String),
 }
@@ -28,6 +32,10 @@ impl fmt::Display for Error {
                 write!(f, "HID++ error {code:#04x} from {feature} function {function}")
             }
             Error::FeatureMissing(feature) => write!(f, "device does not support {feature}"),
+            Error::EffectUnavailable(kind) => write!(f, "zone does not offer the {} effect", kind.name()),
+            Error::OutOfRange { kind, value } => {
+                write!(f, "speed value {value} is outside the {} range", kind.name())
+            }
             Error::Protocol(msg) => write!(f, "unexpected reply: {msg}"),
         }
     }
