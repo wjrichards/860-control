@@ -13,12 +13,12 @@
 
 ## 3. Quick Settings tile
 
-- [ ] 3.1 Create `gnome-extension/` with `metadata.json` (uuid `g512-control@g512control.github.io`, shell-version `["50"]`), `extension.js` and a pure `logic.js` (subtitle, menu model, speed clamping, throttle timing) (D3); verify with `gjs -m tests/logic-test.js` in the `dev` toolbox
-- [ ] 3.2 Write `tests/fake_service.py` (the `Lighting1` interface on a private bus, logging calls, properties changeable on command) and `tests/nested.sh` (D5); verify that the nested Shell starts in the devkit window with the extension enabled, and doesn't touch the real session's bus or dconf
-- [ ] 3.3 Build the toggle (D4): checked = `LightsOn`, click calls `SetLightsOn`, subtitle and sensitivity follow the effect, `GameActive` and `DeviceState`, hidden while the service is absent; verify in the nested Shell against the fake service (screenshots of lit, off, gaming, disconnected and absent, plus the call log)
-- [ ] 3.4 Build the menu (D4): header, effect list with the current effect marked, throttled brightness slider, game switch, "Lighting Settings"; verify in the nested Shell that each control makes the expected call, the slider stays within one call per 100 ms with the final value sent, and outside changes update the open menu
-- [ ] 3.5 Make `disable()` release everything (D4); verify in the nested Shell that disabling and enabling three times leaves no warnings in its log and the tile returns with current values
-- [ ] 3.6 Add `packaging/install-extension.sh` (pack and install); verify it installs into a temporary `XDG_DATA_HOME` and `gnome-extensions info` there lists the extension
+- [x] 3.1 Create `gnome-extension/` with `metadata.json` (uuid `g512-control@g512control.github.io`, shell-version `["50"]`), `extension.js` and a pure `logic.js` (subtitle, menu model, speed clamping, throttle timing) (D3); verify with `gjs -m tests/logic-test.js` in the `dev` toolbox
+- [x] 3.2 Write `tests/fake_service.py` (the `Lighting1` interface on a private bus, logging calls, properties changeable on command) and `tests/nested.sh` (D5); verify that the nested Shell starts in the devkit window with the extension enabled, and doesn't touch the real session's bus or dconf
+- [x] 3.3 Build the toggle (D4): checked = `LightsOn`, click calls `SetLightsOn`, subtitle and sensitivity follow the effect, `GameActive` and `DeviceState`, hidden while the service is absent; verify in the nested Shell against the fake service (screenshots of lit, off, gaming, disconnected and absent, plus the call log)
+- [x] 3.4 Build the menu (D4): header, effect list with the current effect marked, throttled brightness slider, game switch, "Lighting Settings"; verify in the nested Shell that each control makes the expected call, the slider stays within one call per 100 ms with the final value sent, and outside changes update the open menu
+- [x] 3.5 Make `disable()` release everything (D4); verify in the nested Shell that disabling and enabling three times leaves no warnings in its log and the tile returns with current values
+- [x] 3.6 Add `packaging/install-extension.sh` (pack and install); verify it installs into a temporary `XDG_DATA_HOME` and `gnome-extensions info` there lists the extension
 
 ## 4. Docs and real-session check
 
