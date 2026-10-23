@@ -59,4 +59,20 @@ The Gaming map was back **0.55 s after the lighting interface appeared**. The lo
 
 Resume goes through the same `reapply` → "what is due" path (the unit test `replug_during_a_game_shows_gaming_again` covers both). The machine was not suspended for this check.
 
+## A real Steam game (task 3.5), 20:50
+
+- **Setup:** Steam is the Flathub Flatpak (`com.valvesoftware.Steam`). Its sandbox has `/usr/bin/gamemoderun` and `libgamemode.so.0`, and it registers games through the GameMode portal. The user set the game's Launch Options to `gamemoderun %command%`, with the switch on.
+- **A first attempt at 20:45 doesn't count.** The fake game from 3.4 was still registered, so the Gaming map was already showing and the Steam game only moved the count from 1 to 2 and back. It was repeated after the fake game ended at 20:46:13.
+- **The user confirmed the keyboard switched to the Gaming layout and back.** The journal:
+
+| Start | End | Length |
+|---|---|---|
+| 20:50:22.956 | 20:50:30.021 | 7 s |
+| 20:50:38.189 | 20:50:47.026 | 9 s |
+| 20:51:50.611 | 20:52:28.030 | 38 s |
+
+Three registrations: the game or Steam registered more than once during the session, and the keyboard followed each one. Afterwards, `State` was Ripple and `GameActive` false.
+
+Unrelated to this project: `gamemoded` logged "Failed to update cpu governor policy" ("Not authorized"), which is its own polkit permission. It doesn't affect registration or the layout switch.
+
 At the end of the earlier run, `State` read `"Ripple" 61 56 70 52 100`, with `GameSwitch` false and `GameActive` false. The user's `corrections.toml` (`e0 = 85`) stays in place.
