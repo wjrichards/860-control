@@ -1,5 +1,7 @@
 //! Client side of `io.github.g512control.Lighting1`.
 
+use std::collections::HashMap;
+
 use zbus::{
     fdo::PropertiesProxy,
     names::InterfaceName,
@@ -17,6 +19,24 @@ pub const INTERFACE: &str = "io.github.g512control.Lighting1";
 )]
 pub trait Lighting {
     fn set_state(&self, effect: &str, color: (u8, u8, u8), speed: u8, brightness: u8) -> zbus::Result<bool>;
+    fn set_keys(&self, map: &str, keys: &[(u8, u8, u8, u8)]) -> zbus::Result<()>;
+    fn set_game_switch(&self, on: bool) -> zbus::Result<()>;
+}
+
+/// The Custom effect's name on the bus.
+pub const CUSTOM: &str = "Custom";
+
+/// A key map: (key usage, r, g, b); keys not listed are off.
+pub type Keys = Vec<(u8, u8, u8, u8)>;
+
+/// Key maps and the game switch. Empty and off when talking to a service
+/// without per-key support.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PerKey {
+    pub custom: Keys,
+    pub gaming: Keys,
+    pub game_switch: bool,
+    pub game_active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +58,7 @@ pub struct LightingState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceState {
-    Connected { name: String, firmware: String, effects: Vec<EffectInfo>, state: LightingState },
+    Connected { name: String, firmware: String, effects: Vec<EffectInfo>, state: LightingState, per_key: PerKey },
     Disconnected,
     PermissionDenied,
     Unsupported,
@@ -56,11 +76,26 @@ pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> 
             firmware: get("Firmware")?.try_into()?,
             effects: parse_effects(get("Effects")?)?,
             state: parse_state(get("State")?)?,
+            per_key: PerKey {
+                custom: optional(&all, "CustomKeys")?.unwrap_or_default(),
+                gaming: optional(&all, "GamingKeys")?.unwrap_or_default(),
+                game_switch: optional(&all, "GameSwitch")?.unwrap_or_default(),
+                game_active: optional(&all, "GameActive")?.unwrap_or_default(),
+            },
         },
         "permission-denied" => DeviceState::PermissionDenied,
         "unsupported" => DeviceState::Unsupported,
         _ => DeviceState::Disconnected,
     })
+}
+
+/// A property added after v1: absent on older services.
+fn optional<T>(all: &HashMap<String, OwnedValue>, key: &str) -> zbus::Result<Option<T>>
+where
+    T: TryFrom<OwnedValue>,
+    T::Error: Into<zbus::Error>,
+{
+    all.get(key).map(|v| T::try_from(v.try_clone()?).map_err(Into::into)).transpose()
 }
 
 fn parse_effects(v: OwnedValue) -> zbus::Result<Vec<EffectInfo>> {

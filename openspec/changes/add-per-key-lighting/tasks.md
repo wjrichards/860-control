@@ -28,15 +28,15 @@
 
 ## 4. App: key-map editor and game switch
 
-- [ ] 4.1 Add `layout.rs` (ANSI key table: ID, label, row, x and width in quarter-key units, limited to the G512's physical keys); verify with a unit test that every ID is in `KeyId::ALL` and none is duplicated
-- [ ] 4.2 Turn the window into an `AdwNavigationView` with a "Key maps" row opening the editor page; Custom hides the colour and speed rows; verify by AT-SPI that the row is present for every effect and that Custom shows neither colour nor speed
-- [ ] 4.3 Build the key grid (toggle buttons with swatches, the accessible name "W, red"), click and drag selection, group buttons, colour and Off paint, and the Custom/Gaming switch; verify by AT-SPI that selecting WASD and painting green produces `SetKeys custom` with exactly those four keys, throttled to at most one call per 100 ms during a drag (busctl monitor)
+- [x] 4.1 Add `layout.rs` (ANSI key table: ID, label, row, x and width in quarter-key units, limited to the G512's physical keys); verify with a unit test that every ID is in `KeyId::ALL` and none is duplicated
+- [x] 4.2 Turn the window into an `AdwNavigationView` with a "Key maps" row opening the editor page; Custom hides the colour and speed rows; verify by AT-SPI that the row is present for every effect and that Custom shows neither colour nor speed
+- [x] 4.3 Build the key grid (toggle buttons with swatches, the accessible name "W, red"), click and drag selection, group buttons, colour and Off paint, and the Custom/Gaming switch; verify by AT-SPI that selecting WASD and painting green produces `SetKeys custom` with exactly those four keys, throttled to at most one call per 100 ms during a drag (busctl monitor)
 - [ ] 4.4 Make arrow keys move between drawn keys and Space toggle selection; verify by a keyboard-only pass driven through AT-SPI (move to Q, select it, paint it) and by the user's hands-on pass
-- [ ] 4.5 Add the "Switch to Gaming layout while a game runs" row with an explanation of `gamemoderun %command%`, plus a "Gaming layout active" indicator; verify that toggling it reaches `SetGameSwitch`, and that during `gamemode-simulate-game` the indicator appears and then clears
+- [x] 4.5 Add the "Switch to Gaming layout while a game runs" row with an explanation of `gamemoderun %command%`, plus a "Gaming layout active" indicator; verify that toggling it reaches `SetGameSwitch`, and that during `gamemode-simulate-game` the indicator appears and then clears
 - [ ] 4.6 Hands-on pass with the user: paint a Custom map and see it on the keyboard, edit Gaming while Ripple is shown (no change), and check the editor follows light/dark style and the accent colour
 
 ## 5. Docs and checks
 
 - [ ] 5.1 Update the README: Custom and Gaming maps, `corrections.toml` (with the Left Ctrl example), the game switch and `gamemoderun %command%`, and the new `busctl` members; verify by following it for the corrections step on this machine
-- [ ] 5.2 Install the new service and Flatpak over v1, check that the user's v1 `state.toml` still applies, and add `corrections.toml` with `e0 = 85`; verify with the journal and by eye
+- [x] 5.2 Install the new service and Flatpak over v1, check that the user's v1 `state.toml` still applies, and add `corrections.toml` with `e0 = 85`; verify with the journal and by eye
 - [ ] 5.3 Run `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` in the GNOME 50 SDK, host clippy and tests for `g512-hidpp` and `g512d`, and `openspec validate add-per-key-lighting --strict`; all must pass
