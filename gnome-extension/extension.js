@@ -53,7 +53,7 @@ class BrightnessItem extends PopupMenu.PopupBaseMenuItem {
         super({activate: false});
         this.add_child(new St.Icon({icon_name: 'display-brightness-symbolic', style_class: 'popup-menu-icon'}));
         this.slider = new Slider(0);
-        this.slider.accessible_name = 'Keyboard Brightness';
+        this.slider.accessible_name = 'Keyboard Lighting Brightness';
         this.add_child(this.slider);
     }
 });
