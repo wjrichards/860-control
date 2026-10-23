@@ -44,6 +44,25 @@ Custom: Brightness,Key Maps
 3. **The banner was in the accessibility tree while hidden.** It is now also made invisible when not revealed.
 4. **Clicking Gaming showed the Custom colours.** Custom's "toggled" fired before Gaming was active. Both toggles now redraw when they become active.
 
-## Still to check by hand (4.4, 4.6)
+## 4.6 Hands-on pass with the user
 
-Arrow-key movement between drawn keys, drag selection, and the look of the editor in light and dark style with the accent colour. Keyboard and pointer input can't be generated over AT-SPI on this Wayland session.
+- **Custom map on the keyboard:** the user painted the Custom map in the editor with the Custom effect chosen and saw it on the keyboard ("editor pass works, custom shows on the keyboard").
+- **Editing Gaming while Ripple shows:** the keyboard stayed on Ripple. The user selected E in the Gaming view, painted it green and saw it in the drawing (screenshot). The service saved `08 = "#26a269"` under `[gaming]` in `state.toml` at 06:04:59, and `[custom]` was unchanged (W, A, S and D).
+- **Style:** the editor follows light and dark style and the accent colour ("both looked right").
+
+**A missing paint was a missing selection, not a bug.** Two earlier Gaming paints (Q, then E) never reached the service:
+- `state.toml` didn't change, and recordings of calls and error replies were empty.
+- For E, the screenshot and the accessibility tree showed E unselected, and only Q, already red, outlined from an earlier scripted test. Paint Selected repainted Q, so nothing visibly changed.
+- After Clear Selection and a single click, the tree showed E selected, and the paint went through.
+
+## 4.4 Keyboard movement and selection
+
+The editor adds no key handling of its own. GTK's directional focus moves between the drawn keys, because they are positioned to match the keyboard, and Space toggles the focused key.
+
+The task asked for an AT-SPI pass as well, but keyboard input can't be generated over AT-SPI on this Wayland session. So the user's hands-on pass is the evidence. In the Gaming view, after clicking E:
+- **→** moved focus to R, and **↓** moved it to F. Space selected each one.
+- **↑** from F returned to R.
+- At the end, the accessibility tree showed E, R and F selected.
+- Painting the selection uses the same Paint Selected button as the 4.6 pass.
+
+**A held Space toggles twice.** On the first try, R ended up unselected. With this desktop's key repeat (500 ms delay, 30 ms interval), holding Space long enough starts repeat activations. GTK lets a second toggle through after its 250 ms activation guard. A quick tap selected R as expected. This is standard GTK toggle-button behaviour, not something the editor adds.

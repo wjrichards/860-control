@@ -31,9 +31,9 @@
 - [x] 4.1 Add `layout.rs` (ANSI key table: ID, label, row, x and width in quarter-key units, limited to the G512's physical keys); verify with a unit test that every ID is in `KeyId::ALL` and none is duplicated
 - [x] 4.2 Turn the window into an `AdwNavigationView` with a "Key maps" row opening the editor page; Custom hides the colour and speed rows; verify by AT-SPI that the row is present for every effect and that Custom shows neither colour nor speed
 - [x] 4.3 Build the key grid (toggle buttons with swatches, the accessible name "W, red"), click and drag selection, group buttons, colour and Off paint, and the Custom/Gaming switch; verify by AT-SPI that selecting WASD and painting green produces `SetKeys custom` with exactly those four keys, throttled to at most one call per 100 ms during a drag (busctl monitor)
-- [ ] 4.4 Make arrow keys move between drawn keys and Space toggle selection; verify by a keyboard-only pass driven through AT-SPI (move to Q, select it, paint it) and by the user's hands-on pass
+- [x] 4.4 Make arrow keys move between drawn keys and Space toggle selection; verify by a keyboard-only pass driven through AT-SPI (move to Q, select it, paint it) and by the user's hands-on pass
 - [x] 4.5 Add the "Switch to Gaming layout while a game runs" row with an explanation of `gamemoderun %command%`, plus a "Gaming layout active" indicator; verify that toggling it reaches `SetGameSwitch`, and that during `gamemode-simulate-game` the indicator appears and then clears
-- [ ] 4.6 Hands-on pass with the user: paint a Custom map and see it on the keyboard, edit Gaming while Ripple is shown (no change), and check the editor follows light/dark style and the accent colour
+- [x] 4.6 Hands-on pass with the user: paint a Custom map and see it on the keyboard, edit Gaming while Ripple is shown (no change), and check the editor follows light/dark style and the accent colour
 
 ## 5. Docs and checks
 
