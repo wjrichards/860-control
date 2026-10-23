@@ -39,4 +39,4 @@
 
 - [x] 5.1 Update the README: Custom and Gaming maps, `corrections.toml` (with the Left Ctrl example), the game switch and `gamemoderun %command%`, and the new `busctl` members; verify by following it for the corrections step on this machine
 - [x] 5.2 Install the new service and Flatpak over v1, check that the user's v1 `state.toml` still applies, and add `corrections.toml` with `e0 = 85`; verify with the journal and by eye
-- [ ] 5.3 Run `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` in the GNOME 50 SDK, host clippy and tests for `g512-hidpp` and `g512d`, and `openspec validate add-per-key-lighting --strict`; all must pass
+- [x] 5.3 Run `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` in the GNOME 50 SDK, host clippy and tests for `g512-hidpp` and `g512d`, and `openspec validate add-per-key-lighting --strict`; all must pass
