@@ -155,7 +155,7 @@ impl<O: Opener> Controller<O> {
 
     /// Whether the Gaming map is shown because a game is running.
     pub fn game_active(&self) -> bool {
-        self.game_override
+        self.game_override && self.settings.lights_on
     }
 
     /// Open the keyboard if it is not open, and apply what is due.
@@ -206,7 +206,8 @@ impl<O: Opener> Controller<O> {
 
     /// Validate, apply and save a new state. Returns whether it is pending
     /// (saved, to be applied when the keyboard connects). An explicit state
-    /// replaces the Gaming map until the next game starts.
+    /// replaces the Gaming map until the next game starts, and turns the
+    /// lights on.
     pub fn set_state(&mut self, state: LightingState) -> Result<bool, SetError> {
         let offered = if self.conn.is_some() {
             self.offered()
@@ -216,17 +217,20 @@ impl<O: Opener> Controller<O> {
         state.validate(&offered).map_err(SetError::Invalid)?;
         self.game_override = false;
         if self.conn.is_none() {
+            self.settings.lights_on = true;
             self.save(Saved { state, pending: true });
             return Ok(true);
         }
         match self.send(self.state_output(&state)) {
             Ok(()) => {
+                self.settings.lights_on = true;
                 self.save(Saved { state, pending: false });
                 Ok(false)
             }
             Err(e) if is_link_error(&e) => {
                 eprintln!("keyboard went away while applying: {e}");
                 self.disconnect();
+                self.settings.lights_on = true;
                 self.save(Saved { state, pending: true });
                 Ok(true)
             }
@@ -265,6 +269,15 @@ impl<O: Opener> Controller<O> {
         Ok(())
     }
 
+    /// Turn the lights off (Off on the keyboard, everything else kept) or
+    /// back on (whatever is due). Saved either way; while disconnected it is
+    /// applied on connect.
+    pub fn set_lights_on(&mut self, on: bool) {
+        self.settings.lights_on = on;
+        self.persist();
+        self.apply_due_logged();
+    }
+
     /// Turn the game switch on or off. Turning it on during a game shows
     /// the Gaming map; turning it off returns to the saved state.
     pub fn set_game_switch(&mut self, on: bool) {
@@ -273,7 +286,9 @@ impl<O: Opener> Controller<O> {
         let show_gaming = on && self.game_running;
         if show_gaming != self.game_override {
             self.game_override = show_gaming;
-            self.apply_due_logged();
+            if self.settings.lights_on {
+                self.apply_due_logged();
+            }
         }
     }
 
@@ -288,6 +303,12 @@ impl<O: Opener> Controller<O> {
             return false;
         }
         self.game_override = show_gaming;
+        // Games are still tracked while the lights are off, so turning them
+        // on mid-game shows the Gaming map.
+        if !self.settings.lights_on {
+            eprintln!("game {}; the lights are off", if show_gaming { "started" } else { "ended" });
+            return false;
+        }
         if show_gaming {
             eprintln!("game started; showing the Gaming map");
         } else {
@@ -333,6 +354,9 @@ impl<O: Opener> Controller<O> {
 
     /// Whether `name` is the map on the keyboard right now.
     fn shows(&self, name: MapName) -> bool {
+        if !self.settings.lights_on {
+            return false;
+        }
         match name {
             MapName::Gaming => self.game_override,
             MapName::Custom => !self.game_override && self.saved().is_some_and(|s| s.state.effect == Effect::Custom),
@@ -341,6 +365,9 @@ impl<O: Opener> Controller<O> {
 
     /// What should be on the keyboard; `None` leaves it as it is.
     fn due_output(&self) -> Option<Output> {
+        if !self.settings.lights_on {
+            return Some(Output::Zone(EffectKind::Off, EffectParams::default()));
+        }
         if self.game_override {
             let brightness = self.saved().map_or(BRIGHTNESS_MAX, |s| s.state.brightness);
             return Some(self.map_output(&self.settings.gaming(), brightness));
@@ -377,7 +404,7 @@ impl<O: Opener> Controller<O> {
     }
 
     fn apply_on_connect(&mut self) {
-        if !self.game_override {
+        if self.settings.lights_on && !self.game_override {
             if let Some(Err(e)) = self.saved().map(|s| s.state.validate(&self.offered())) {
                 eprintln!("saved state not applied: {e}");
                 return;
@@ -762,5 +789,90 @@ mod tests {
         c.set_game_switch(true);
         c.set_game_count(1);
         assert!(frames(&last).pop().unwrap().contains(&[0x1a, 0x80, 0x10, 0x00]));
+    }
+
+    #[test]
+    fn lights_off_then_on_restores_the_state() {
+        let (mut c, last) = controller("lights", &["g512"]);
+        c.connect();
+        c.set_state(ripple()).unwrap();
+        c.set_lights_on(false);
+        assert_eq!(last_zone_effect(&last), 0, "Off");
+        assert!(!c.settings().lights_on);
+        assert_eq!(c.saved().unwrap().state, ripple(), "the saved state is kept");
+        c.set_lights_on(true);
+        assert_eq!(last_zone_effect(&last), 6, "Ripple back");
+    }
+
+    #[test]
+    fn set_state_turns_the_lights_on() {
+        let (mut c, last) = controller("lights-set", &["g512"]);
+        c.connect();
+        c.set_state(ripple()).unwrap();
+        c.set_lights_on(false);
+        c.set_state(red()).unwrap();
+        assert!(c.settings().lights_on);
+        assert_ne!(last_zone_effect(&last), 0);
+    }
+
+    #[test]
+    fn rejected_state_leaves_the_lights_off() {
+        let (mut c, _) = controller("lights-invalid", &["g512"]);
+        c.connect();
+        c.set_lights_on(false);
+        assert!(c.set_state(LightingState { brightness: 150, ..red() }).is_err());
+        assert!(!c.settings().lights_on);
+    }
+
+    #[test]
+    fn game_with_the_lights_off_stays_dark() {
+        let (mut c, last) = controller("lights-game", &["g512"]);
+        c.connect();
+        c.set_state(ripple()).unwrap();
+        c.set_game_switch(true);
+        c.set_lights_on(false);
+        let writes = applied(&last).len();
+        assert!(!c.set_game_count(1), "nothing a front end sees changes");
+        assert!(!c.game_active());
+        assert_eq!(applied(&last).len(), writes, "no write to the keyboard");
+        assert!(frames(&last).is_empty());
+        c.set_lights_on(true);
+        assert!(c.game_active(), "turning on mid-game shows Gaming");
+        assert!(frames(&last).pop().unwrap().contains(&GAMING_W));
+    }
+
+    #[test]
+    fn replug_with_the_lights_off_sends_off() {
+        let (mut c, last) = controller("lights-replug", &["g512", "g512"]);
+        c.connect();
+        c.set_state(ripple()).unwrap();
+        c.set_lights_on(false);
+        last.borrow().as_ref().unwrap().borrow_mut().drop_next_reply();
+        assert!(c.reapply());
+        assert_eq!(applied(&last).len(), 1, "one write to the reopened keyboard");
+        assert_eq!(last_zone_effect(&last), 0, "Off, not the firmware default or Ripple");
+    }
+
+    #[test]
+    fn lights_off_while_disconnected_applies_on_connect() {
+        let (mut c, last) = controller("lights-pending", &["g512"]);
+        assert!(c.set_state(ripple()).unwrap(), "pending");
+        c.set_lights_on(false);
+        assert!(c.connect());
+        assert_eq!(last_zone_effect(&last), 0);
+    }
+
+    #[test]
+    fn map_edits_and_game_switch_keep_the_lights_off() {
+        let (mut c, last) = controller("lights-keys", &["g512"]);
+        c.connect();
+        c.set_state(custom(100)).unwrap();
+        c.set_lights_on(false);
+        let shown = frames(&last).len();
+        c.set_keys(MapName::Custom, w_red()).unwrap();
+        c.set_game_switch(true);
+        assert!(!c.settings().lights_on);
+        assert_eq!(frames(&last).len(), shown, "an edit while dark is saved, not shown");
+        assert_eq!(c.settings().custom, w_red());
     }
 }

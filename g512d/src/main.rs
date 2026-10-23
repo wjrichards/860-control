@@ -71,6 +71,11 @@ fn main() -> ExitCode {
     eprintln!("g512d {} serving {BUS_NAME}; keyboard {}", env!("CARGO_PKG_VERSION"), status.as_str());
     dbus::notify(&conn);
 
+    if status == controller::DeviceStatus::PermissionDenied {
+        if let Err(e) = events::spawn_login_retry(ctl.clone(), conn.clone()) {
+            eprintln!("warning: cannot retry opening the keyboard ({e}); replug it to connect");
+        }
+    }
     if let Err(e) = events::spawn_hotplug(ctl.clone(), conn.clone()) {
         eprintln!("warning: no hotplug events ({e}); replugging the keyboard will not re-apply lighting");
     }

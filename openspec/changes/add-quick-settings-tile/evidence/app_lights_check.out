@@ -1,0 +1,5 @@
+start: service LightsOn b false, app row 'switch: Lights'
+flipped the row on: calls Member=SetLightsOn args BOOLEAN true 
+  service LightsOn b true, app row 'switch: Lights [checked]'
+busctl SetLightsOn false: app row 'switch: Lights'
+busctl SetLightsOn true: app row 'switch: Lights [checked]'

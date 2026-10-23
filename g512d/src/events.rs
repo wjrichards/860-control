@@ -1,4 +1,5 @@
-//! Keyboard hotplug (kernel uevents over netlink) and resume (logind).
+//! Keyboard hotplug (kernel uevents over netlink), resume (logind), and
+//! access arriving just after login.
 
 use std::{
     io,
@@ -7,7 +8,10 @@ use std::{
     time::Duration,
 };
 
-use crate::dbus::{Shared, notify};
+use crate::{
+    controller::DeviceStatus,
+    dbus::{Shared, notify},
+};
 
 /// Let udev apply the `uaccess` ACL before opening a new node.
 const HOTPLUG_SETTLE: Duration = Duration::from_millis(500);
@@ -15,6 +19,9 @@ const HOTPLUG_SETTLE: Duration = Duration::from_millis(500);
 const RESUME_SETTLE: Duration = Duration::from_secs(1);
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 const ATTEMPTS: u32 = 3;
+/// At login the session's `uaccess` ACL can land just after the service
+/// starts, with no uevent to say so: keep trying for 15 s.
+const LOGIN_ATTEMPTS: u32 = 30;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Uevent {
@@ -145,6 +152,39 @@ pub fn spawn_hotplug(ctl: Shared, conn: zbus::blocking::Connection) -> io::Resul
     Ok(())
 }
 
+/// If the keyboard was there but not ours to open when the service started,
+/// retry until access arrives (or give up after `LOGIN_ATTEMPTS`).
+pub fn spawn_login_retry(ctl: Shared, conn: zbus::blocking::Connection) -> io::Result<()> {
+    thread::Builder::new().name("login-retry".into()).spawn(move || {
+        let (attempt, status) = retry_while_denied(LOGIN_ATTEMPTS, || {
+            thread::sleep(RETRY_DELAY);
+            let mut c = ctl.lock().unwrap_or_else(|e| e.into_inner());
+            c.connect();
+            c.status()
+        });
+        if status == DeviceStatus::PermissionDenied {
+            eprintln!("still no permission to open the keyboard after {attempt} retries; replug it or check the udev rule");
+        } else {
+            eprintln!("keyboard access arrived; keyboard {} (retry {attempt})", status.as_str());
+        }
+        notify(&conn);
+    })?;
+    Ok(())
+}
+
+/// Call `connect` until it reports something other than permission denied,
+/// at most `attempts` times. Returns the number of calls and the last status.
+fn retry_while_denied(attempts: u32, mut connect: impl FnMut() -> DeviceStatus) -> (u32, DeviceStatus) {
+    let mut status = DeviceStatus::PermissionDenied;
+    for attempt in 1..=attempts {
+        status = connect();
+        if status != DeviceStatus::PermissionDenied {
+            return (attempt, status);
+        }
+    }
+    (attempts, status)
+}
+
 pub fn spawn_resume(ctl: Shared, conn: zbus::blocking::Connection) -> zbus::Result<()> {
     let system = zbus::blocking::Connection::system()?;
     let proxy = zbus::blocking::Proxy::new(
@@ -174,6 +214,29 @@ pub fn spawn_resume(ctl: Shared, conn: zbus::blocking::Connection) -> zbus::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_retry_stops_once_access_arrives() {
+        let denied = DeviceStatus::PermissionDenied;
+        let mut replies = [denied, denied, DeviceStatus::Connected].into_iter();
+        assert_eq!(retry_while_denied(30, || replies.next().unwrap()), (3, DeviceStatus::Connected));
+    }
+
+    #[test]
+    fn login_retry_gives_up() {
+        let mut calls = 0;
+        let result = retry_while_denied(4, || {
+            calls += 1;
+            DeviceStatus::PermissionDenied
+        });
+        assert_eq!((result, calls), ((4, DeviceStatus::PermissionDenied), 4));
+    }
+
+    #[test]
+    fn login_retry_stops_on_other_states() {
+        // Unplugged during the wait: hotplug takes over from here.
+        assert_eq!(retry_while_denied(30, || DeviceStatus::Disconnected), (1, DeviceStatus::Disconnected));
+    }
 
     #[test]
     fn parses_kernel_hidraw_add() {

@@ -1,0 +1,6 @@
+{
+  "uuid": "unsafe-helper@g512control.github.io",
+  "name": "Test helper: unsafe mode",
+  "description": "Only for the nested test Shell: turns on unsafe mode so the tests can use Eval and Screenshot. Never install it in a real session.",
+  "shell-version": ["50"]
+}

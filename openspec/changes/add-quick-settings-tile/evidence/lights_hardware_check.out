@@ -1,0 +1,11 @@
+[0s] start: LightsOn b true GameSwitch b true State (s(yyy)yy) "Ripple" 61 56 70 52 100 
+[0s] SetLightsOn false: LightsOn b false (keyboard should be dark)
+[3s] gamemode-simulate-game (10 s) with the lights off
+[6s] during the game: GameActive b false LightsOn b false (keyboard should stay dark)
+[14s] game over: GameActive b false 
+[14s] SetLightsOn true: LightsOn b true (Ripple should be back)
+[17s] SetLightsOn false again
+[20s] SetState Ripple while dark: LightsOn b true (Ripple should be back)
+--- service log:
+game started; the lights are off
+game ended; the lights are off

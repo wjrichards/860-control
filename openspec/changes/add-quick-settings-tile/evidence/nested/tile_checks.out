@@ -1,0 +1,34 @@
+== 3.3 toggle
+ok   lit: visible, checked, sensitive, effect as subtitle
+ok   click sends SetLightsOn(false)
+ok   off: unchecked, sensitive, subtitle label hidden
+ok   click again sends SetLightsOn(true)
+ok   on again
+ok   game running: Gaming Layout
+ok   disconnected: insensitive with subtitle
+ok   no permission
+ok   service gone: tile hidden
+ok   service back: tile shown with its values
+== 3.4 menu
+ok   header shows the device
+ok   effects listed
+ok   current effect marked
+ok   slider at the saved brightness
+ok   game switch off
+ok   Lighting Settings item present
+ok   choosing Wave sends SetState with the saved colour, speed and brightness
+ok   Wave marked
+ok   subtitle follows
+ok   speed clamped to the effect's range
+     slider drag 100 -> 20 over 1 s: 11 SetState calls, smallest gap 0.100s, last brightness 20
+ok   slider: at most one call per 100 ms, final value sent
+ok   slider shows the saved value afterwards
+ok   game switch sends SetGameSwitch(true)
+ok   game switch on
+ok   outside change: marked effect follows
+ok   outside change: slider follows
+ok   outside change: subtitle follows
+== 3.5 disable and enable
+ok   tile back with current values
+ok   no new warnings in the Shell log
+== 29 passed, 0 failed

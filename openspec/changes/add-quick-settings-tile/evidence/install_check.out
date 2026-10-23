@@ -1,0 +1,9 @@
+Installed g512-control@g512control.github.io to $TMP/data/gnome-shell/extensions/g512-control@g512control.github.io.
+
+Log out and back in, then: gnome-extensions enable g512-control@g512control.github.io
+--- installed files:
+./extension.js
+./logic.js
+./metadata.json
+--- metadata:
+g512-control@g512control.github.io ['50']
