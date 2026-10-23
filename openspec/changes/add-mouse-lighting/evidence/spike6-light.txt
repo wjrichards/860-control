@@ -1,0 +1,16 @@
+device /dev/hidraw10: ColorLedEffects slot 0x02, OnboardProfiles slot 0x0c
+effect indexes (static, off): {0: (1, 0), 1: (1, 0)}; mode at start: 1
+
+[  0.0s] zone 0 -> ff0000: ok
+[  0.0s] zone 1 -> off: ok
+         STEP 1: zone 0 RED, zone 1 off -- which part is red?  (mode 1)
+[  6.0s] zone 0 -> off: ok
+[  6.0s] zone 1 -> 0000ff: ok
+         STEP 2: zone 0 off, zone 1 BLUE -- which part is blue?  (mode 1)
+[ 12.0s] zone 0 -> 00ff00: ok
+[ 12.0s] zone 1 -> 00ff00: ok
+         STEP 3: both GREEN  (mode 1)
+[ 18.0s] zone 0 -> ffffff: ok
+[ 18.0s] zone 1 -> ffffff: ok
+         STEP 4: both WHITE -- press the DPI-up button once now, then watch for 20 s  (mode 1)
+[ 38.1s] done, mode 1. Still white? Unplug and replug the mouse to get its own lighting back.
