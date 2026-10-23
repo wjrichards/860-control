@@ -2,11 +2,12 @@
 
 Lighting control for the Logitech G512 RGB keyboard (USB `046d:c33c`) on a GNOME desktop.
 
-It has three parts:
+It has four parts:
 
 - **`g512d`**: a user service that owns the keyboard. It applies lighting over HID++ 2.0, saves the last setting, and re-applies it when the keyboard is plugged back in or the computer wakes from suspend. It offers a session D-Bus interface, `io.github.g512control.Lighting1`.
 - **G512 Control** (`io.github.g512control.Control`): a GTK4/libadwaita app, packaged as a Flatpak. It talks to `g512d` over D-Bus and has no access to the keyboard itself.
-- **`g512-hidpp`**: the protocol library both of these are built on.
+- **Quick Settings tile** (`gnome-extension/`): an optional GNOME Shell 50 extension with the everyday controls. It also only talks to `g512d`.
+- **`g512-hidpp`**: the protocol library the service is built on.
 
 Effects: Off, Static, Breathe, Colour cycle, Wave, Ripple and Custom. Each has the colour and speed settings it supports, plus brightness. The keyboard has no brightness command of its own: brightness dims the colour, or for Cycle and Wave it sets their intensity.
 
@@ -45,6 +46,38 @@ flatpak run org.flatpak.Builder --user --install --force-clean \
 ```
 
 Open **G512 Control** from the app grid.
+
+### 4. Quick Settings tile (optional)
+
+A **Keyboard** tile in GNOME's Quick Settings menu:
+- Clicking it turns the lights off and back on.
+- Its menu has the effect list, a brightness slider, the gaming layout switch, and **Lighting Settings**, which opens the app.
+
+It is a GNOME Shell extension for GNOME 50.
+
+1. Turn on extensions if they are off: open the Extensions app and switch on **Use Extensions**, or run `gsettings set org.gnome.shell disable-user-extensions false`.
+2. Install the tile:
+
+   ```sh
+   packaging/install-extension.sh
+   ```
+
+3. Log out and back in. GNOME Shell on Wayland only loads new extensions at login.
+4. Enable it, in the Extensions app or with:
+
+   ```sh
+   gnome-extensions enable g512-control@g512control.github.io
+   ```
+
+The tile hides itself while `g512d` isn't running, and never starts it. After a GNOME upgrade beyond version 50, the Shell turns the tile off until the extension is updated.
+
+## Lights on and off
+
+**Lights** in the app, or clicking the tile, turns the keyboard dark without forgetting anything. Turning the lights back on shows your effect again, or the Gaming layout if a game is running.
+
+- While the lights are off, starting a game doesn't light the keyboard.
+- The keyboard stays dark after replugging, waking from suspend or logging in.
+- Choosing an effect or changing brightness, in the app, the tile or with `SetState`, turns the lights back on.
 
 ## Key maps
 
@@ -114,15 +147,20 @@ busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighti
 # Show the Gaming map while GameMode reports a game
 busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
     io.github.g512control.Lighting1 SetGameSwitch b true
+
+# Lights off, keeping everything else; `b true` turns them back on
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetLightsOn b false
 ```
 
-`SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running.
+`SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running. `LightsOn` is false while the keyboard is dark.
 
-The saved state, both maps and the game switch are in `~/.config/g512-control/state.toml`.
+The saved state, both maps, the game switch and the lights setting are in `~/.config/g512-control/state.toml`.
 
 ## Uninstall
 
 ```sh
+packaging/install-extension.sh --uninstall
 flatpak uninstall --user io.github.g512control.Control
 packaging/install-service.sh --uninstall
 sudo rm /etc/udev/rules.d/70-g512-control.rules && sudo udevadm control --reload
@@ -135,7 +173,7 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 - **Don't run it alongside OpenRGB, g810-led or another lighting tool.** They write to the same keyboard and will overwrite each other.
 - **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects and PerKeyLighting. Of PerKeyLighting, only "set keys" and "commit" are used. The keyboard also has firmware-update, reset and hidden engineering features, which the code cannot address.
 - **Lighting is written to the keyboard's RAM only,** never to its stored settings.
-- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, and for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`.
+- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, and for the tile in `openspec/changes/add-quick-settings-tile/evidence/`.
 - **Only the ANSI (US) layout** is drawn and addressed.
 
 ## Development
@@ -143,6 +181,14 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 ```sh
 cargo test                                   # g512-hidpp and g512d, on the host
 cargo test -p g512-hidpp -- --ignored        # hardware tests: Static green, then a WASD frame
+```
+
+The tile's logic tests need only `gjs`. The tile itself is tested in a headless nested GNOME Shell against a fake service, on a private session bus with throwaway settings. Neither touches your session or the keyboard. Both need GNOME Shell 50 and `mutter-devkit`, which a toolbox can provide:
+
+```sh
+toolbox run -c dev gjs -m gnome-extension/tests/logic-test.js
+toolbox run -c dev sh gnome-extension/tests/nested.sh \
+    openspec/changes/add-quick-settings-tile/evidence/tile_checks.sh /tmp/tile-out   # add --devkit to watch it
 ```
 
 The app needs GTK and libadwaita development files. The host doesn't have them, so build it inside the GNOME SDK. One way is a build sandbox:

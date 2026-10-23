@@ -31,7 +31,7 @@ if [ "${1:-}" != --inside ]; then
     env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin LANG=C.UTF-8 \
         XDG_RUNTIME_DIR="$tmp/run" XDG_DATA_HOME="$tmp/data" XDG_CONFIG_HOME="$tmp/config" \
         XDG_CACHE_HOME="$tmp/cache" XDG_STATE_HOME="$tmp/state" GSETTINGS_BACKEND=memory \
-        HOST_WAYLAND="${XDG_RUNTIME_DIR:-}/${WAYLAND_DISPLAY:-}" \
+        HOST_RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" HOST_WAYLAND_NAME="${WAYLAND_DISPLAY:-wayland-0}" \
         dbus-run-session -- sh "$0" --inside "$check" "$out" "$mode" || status=$?
     # The session's document portal may still have its FUSE mount here.
     fusermount3 -uz "$tmp/run/doc" 2> /dev/null || true
@@ -63,7 +63,10 @@ calls() {
 python3 -I "$here/fake_service.py" --yes-this-is-a-private-bus > "$out/service.log" 2>&1 &
 fake=$!
 if [ "$mode" = --devkit ]; then
-    WAYLAND_DISPLAY=$HOST_WAYLAND gnome-shell --devkit --wayland --no-x11 > "$out/shell.log" 2>&1 &
+    # The devkit viewer is a window on the real desktop, fed over the real
+    # PipeWire; everything else stays private.
+    WAYLAND_DISPLAY="$HOST_RUNTIME/$HOST_WAYLAND_NAME" PIPEWIRE_RUNTIME_DIR="$HOST_RUNTIME" \
+        gnome-shell --devkit --wayland --no-x11 > "$out/shell.log" 2>&1 &
 else
     gnome-shell --headless --virtual-monitor 1280x800 --wayland --no-x11 --wayland-display=g512-test \
         > "$out/shell.log" 2>&1 &
