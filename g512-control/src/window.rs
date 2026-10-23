@@ -42,6 +42,7 @@ pub struct Ui {
     status_detail: gtk::Label,
     retry: gtk::Button,
     device_row: adw::ActionRow,
+    lights_row: adw::SwitchRow,
     effect_row: adw::ComboRow,
     effect_names: gtk::StringList,
     color_row: adw::ActionRow,
@@ -168,7 +169,9 @@ impl Ui {
             .build();
         keymaps_row.add_suffix(&keymaps_button);
 
+        let lights_row = adw::SwitchRow::builder().title("Lights").build();
         let lighting_group = adw::PreferencesGroup::builder().title("Lighting").build();
+        lighting_group.add(&lights_row);
         lighting_group.add(&effect_row);
         lighting_group.add(&color_row);
         lighting_group.add(&speed_row);
@@ -215,6 +218,7 @@ impl Ui {
             status_detail,
             retry,
             device_row,
+            lights_row,
             effect_row,
             effect_names,
             color_row,
@@ -262,6 +266,21 @@ impl Ui {
                 }
                 ui.nav.push_by_tag("keymaps");
             }
+        });
+        let w = weak.clone();
+        self.lights_row.connect_active_notify(move |row| {
+            let Some(ui) = w.upgrade() else { return };
+            if ui.syncing.get() {
+                return;
+            }
+            let Some(bus) = ui.bus.borrow().clone() else { return };
+            let on = row.is_active();
+            glib::spawn_future_local(async move {
+                if let Err(e) = bus.lighting.set_lights_on(on).await {
+                    ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                    ui.refresh().await;
+                }
+            });
         });
         let w = weak.clone();
         self.game_row.connect_active_notify(move |row| {
@@ -338,7 +357,8 @@ impl Ui {
                 eprintln!("lighting service unavailable: {e}");
                 self.show_status(Status::ServiceMissing);
             }
-            Ok(DeviceState::Connected { name, firmware, effects, state, per_key }) => {
+            Ok(DeviceState::Connected { name, firmware, effects, state, per_key, lights_on }) => {
+                self.show_lights(lights_on);
                 self.show_per_key(&effects, &per_key);
                 self.show_controls(&name, &firmware, effects, &state)
             }
@@ -418,6 +438,14 @@ impl Ui {
         self.speed.set_value(f64::from(state.speed));
         self.brightness.set_value(f64::from(state.brightness));
         self.update_visibility();
+        self.syncing.set(false);
+    }
+
+    /// The Lights switch, hidden on a service without the setting.
+    fn show_lights(&self, lights_on: Option<bool>) {
+        self.lights_row.set_visible(lights_on.is_some());
+        self.syncing.set(true);
+        self.lights_row.set_active(lights_on.unwrap_or(true));
         self.syncing.set(false);
     }
 

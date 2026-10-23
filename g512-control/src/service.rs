@@ -21,6 +21,7 @@ pub trait Lighting {
     fn set_state(&self, effect: &str, color: (u8, u8, u8), speed: u8, brightness: u8) -> zbus::Result<bool>;
     fn set_keys(&self, map: &str, keys: &[(u8, u8, u8, u8)]) -> zbus::Result<()>;
     fn set_game_switch(&self, on: bool) -> zbus::Result<()>;
+    fn set_lights_on(&self, on: bool) -> zbus::Result<()>;
 }
 
 /// The Custom effect's name on the bus.
@@ -58,7 +59,15 @@ pub struct LightingState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceState {
-    Connected { name: String, firmware: String, effects: Vec<EffectInfo>, state: LightingState, per_key: PerKey },
+    Connected {
+        name: String,
+        firmware: String,
+        effects: Vec<EffectInfo>,
+        state: LightingState,
+        per_key: PerKey,
+        /// `None` on a service without the lights setting.
+        lights_on: Option<bool>,
+    },
     Disconnected,
     PermissionDenied,
     Unsupported,
@@ -82,6 +91,7 @@ pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> 
                 game_switch: optional(&all, "GameSwitch")?.unwrap_or_default(),
                 game_active: optional(&all, "GameActive")?.unwrap_or_default(),
             },
+            lights_on: optional(&all, "LightsOn")?,
         },
         "permission-denied" => DeviceState::PermissionDenied,
         "unsupported" => DeviceState::Unsupported,
