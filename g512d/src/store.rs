@@ -1,5 +1,6 @@
 //! The saved settings, `$XDG_CONFIG_HOME/g512-control/state.toml`: the
-//! lighting state, both key maps and the game switch.
+//! lighting state, both key maps, the game switch and whether the lights
+//! are on.
 
 use std::{
     collections::BTreeMap,
@@ -21,7 +22,7 @@ pub struct Saved {
     pub pending: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     /// `None` until a state has been set; the keyboard is then left alone.
     pub saved: Option<Saved>,
@@ -29,6 +30,14 @@ pub struct Settings {
     /// `None` until the user edits it: the built-in default applies.
     pub gaming: Option<KeyMap>,
     pub game_switch: bool,
+    /// Off shows Off on the keyboard without touching anything else.
+    pub lights_on: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { saved: None, custom: KeyMap::default(), gaming: None, game_switch: false, lights_on: true }
+    }
 }
 
 impl Settings {
@@ -38,7 +47,8 @@ impl Settings {
 }
 
 /// The file format. The state fields are optional so maps can be saved
-/// before any state; v1 files have only the state fields.
+/// before any state; v1 files have only the state fields, and files from
+/// before the lights setting have no `lights_on`.
 #[derive(Serialize, Deserialize)]
 struct File {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,10 +63,16 @@ struct File {
     pending: bool,
     #[serde(default)]
     game_switch: bool,
+    #[serde(default = "lights_on_default")]
+    lights_on: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     custom: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     gaming: Option<BTreeMap<String, String>>,
+}
+
+fn lights_on_default() -> bool {
+    true
 }
 
 pub struct Store {
@@ -139,6 +155,7 @@ fn encode(settings: &Settings) -> String {
         brightness: s.map(|s| s.brightness),
         pending: settings.saved.is_some_and(|saved| saved.pending),
         game_switch: settings.game_switch,
+        lights_on: settings.lights_on,
         custom: encode_map(&settings.custom),
         gaming: settings.gaming.as_ref().map(encode_map),
     };
@@ -166,6 +183,7 @@ fn decode(text: &str) -> Result<Settings, String> {
         custom: decode_map(&file.custom)?,
         gaming: file.gaming.as_ref().map(decode_map).transpose()?,
         game_switch: file.game_switch,
+        lights_on: file.lights_on,
     })
 }
 
@@ -196,6 +214,7 @@ mod tests {
             custom: KeyMap::from_entries([(0x1a, Rgb::new(0, 0xff, 0))]).unwrap(),
             gaming: None,
             game_switch: true,
+            lights_on: false,
         };
         store.save(&settings).unwrap();
         assert_eq!(store.load(), settings);
@@ -203,6 +222,7 @@ mod tests {
         assert!(text.contains("effect = \"Ripple\"") && text.contains("color = \"#00ffff\""), "{text}");
         assert!(text.contains("[custom]") && text.contains("1a = \"#00ff00\""), "{text}");
         assert!(!text.contains("[gaming]"), "an unedited Gaming map is not written: {text}");
+        assert!(text.contains("lights_on = false"), "{text}");
 
         let gaming = KeyMap::from_entries([(0x04, Rgb::new(1, 2, 3))]).unwrap();
         let edited = Settings { gaming: Some(gaming), ..settings };
@@ -225,8 +245,22 @@ mod tests {
             (state.effect, state.color, state.speed, state.brightness),
             (Effect::Zone(EffectKind::Ripple), Rgb::new(0x3d, 0x38, 0x46), 52, 100)
         );
-        assert_eq!((&s.custom, &s.gaming, s.game_switch), (&KeyMap::default(), &None, false));
+        assert_eq!((&s.custom, &s.gaming, s.game_switch, s.lights_on), (&KeyMap::default(), &None, false, true));
         assert_eq!(s.gaming(), KeyMap::default_gaming());
+        fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn file_without_lights_setting_loads_lit() {
+        let store = temp_store("change-2");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        // As written before the lights setting: state, game switch and maps.
+        let text = "effect = \"Ripple\"\ncolor = \"#3d3846\"\nspeed = 52\nbrightness = 100\npending = false\n\
+                    game_switch = true\n\n[custom]\n1a = \"#ff2000\"\n";
+        fs::write(store.path(), text).unwrap();
+        let s = store.load();
+        assert!(s.lights_on && s.game_switch && s.saved.is_some());
+        assert_eq!(s.custom.entries().count(), 1);
         fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
     }
 

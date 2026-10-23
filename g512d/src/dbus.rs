@@ -56,7 +56,8 @@ impl Lighting {
         self.custom_keys_changed(emitter).await?;
         self.gaming_keys_changed(emitter).await?;
         self.game_switch_changed(emitter).await?;
-        self.game_active_changed(emitter).await
+        self.game_active_changed(emitter).await?;
+        self.lights_on_changed(emitter).await
     }
 }
 
@@ -173,6 +174,19 @@ impl Lighting {
     #[zbus(property)]
     async fn game_active(&self) -> bool {
         self.ctl().game_active()
+    }
+
+    /// False while the keyboard is dark; the state, maps and game switch
+    /// are kept and come back when it is turned on.
+    #[zbus(property)]
+    async fn lights_on(&self) -> bool {
+        self.ctl().settings().lights_on
+    }
+
+    async fn set_lights_on(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, on: bool) -> fdo::Result<()> {
+        self.ctl().set_lights_on(on);
+        self.emit_all(&emitter).await?;
+        Ok(())
     }
 }
 

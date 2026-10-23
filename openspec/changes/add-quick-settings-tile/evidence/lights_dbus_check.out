@@ -1,0 +1,12 @@
+hidraw nodes visible: 0
+DeviceState: s "disconnected"
+LightsOn at start: b true
+LightsOn after SetLightsOn false: b false
+signal carried LightsOn=false: 1
+saved: lights_on = false
+b true
+LightsOn after SetState: b true
+saved: lights_on = true
+--- service log:
+g512d 0.1.0 serving io.github.g512control.Lighting1; keyboard disconnected
+warning: no resume events (D-Bus handshake failed: EXTERNAL rejected by the server. Accepted mechanisms: [EXTERNAL]); lighting will not be re-applied after suspend
