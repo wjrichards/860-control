@@ -26,3 +26,9 @@
 - [x] 4.1 README: Quick Settings tile section (turn on extensions, install, log out and in, enable), the Lights switch, and the `SetLightsOn` `busctl` example
 - [x] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
 - [ ] 4.3 Real session with the user, after they turn on extensions, install and log out and in: the tile toggles the keyboard; effects, slider, game switch and "Lighting Settings" work; the app and tile stay in step; the tile follows light and dark style
+
+## Archived with two tasks unconfirmed
+
+The user chose to archive on 2026-10-23 with 1.5 and 4.3 unticked. Both were merged in PR #5.
+- **1.5:** the retry loop is unit-tested and installed (13:18:17, main `d65664c`), but no real login has happened since. Next login: `journalctl --user -u g512d` should show "keyboard access arrived" or a plain "connected", with no restart needed.
+- **4.3:** the tile is loaded and ACTIVE in the real session (seen in GNOME Shell's accessibility tree), and the nested-Shell checks pass 29 of 29. No calls from the tile itself have been recorded in the real session yet. See `evidence/tile-checks.md`.
