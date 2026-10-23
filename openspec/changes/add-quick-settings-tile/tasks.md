@@ -5,11 +5,11 @@
 - [x] 1.1 Add `lights_on` to `Controller` (D1): `due_output()` returns zone Off when it is false; `set_lights_on(bool)` applies what is due; `set_state` turns it on; game tracking continues while off. Verify with fake-device tests: off then on restores Ripple; SetState while off turns on; a game starting while off stays dark and turning on during the game shows Gaming; replug while off sends Off; SetKeys and SetGameSwitch leave it unchanged
 - [x] 1.2 Save `lights_on` in `state.toml` (D1, Migration Plan); verify with store tests that a v1 file and a change-2 file both load with lights on, and that off round-trips
 - [x] 1.3 Add the `LightsOn` property and `SetLightsOn(b)` method (D2), emitted with the other properties; verify with a D-Bus test or `busctl` against a test instance that the value round-trips and a `PropertiesChanged` signal carries it
-- [ ] 1.4 Install the service and check on the keyboard (user OK for the restart): off and on via `busctl`, replug while off stays dark, `gamemode-simulate-game` while off stays dark, and `SetState` while off lights it
+- [x] 1.4 Install the service and check on the keyboard (user OK for the restart): off and on via `busctl`, replug while off stays dark, `gamemode-simulate-game` while off stays dark, and `SetState` while off lights it
 
 ## 2. App: Lights switch
 
-- [ ] 2.1 Add the "Lights" `AdwSwitchRow` (D6), read as an optional property and hidden without it; verify by AT-SPI that flipping it sends `SetLightsOn` and that a `busctl` change flips the row
+- [x] 2.1 Add the "Lights" `AdwSwitchRow` (D6), read as an optional property and hidden without it; verify by AT-SPI that flipping it sends `SetLightsOn` and that a `busctl` change flips the row
 
 ## 3. Quick Settings tile
 

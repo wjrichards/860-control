@@ -38,3 +38,32 @@ The installed service and the keyboard aren't touched. Output, from `lights_dbus
 - `SetState` Static blue (pending, since no keyboard is visible) turns `LightsOn` back to `true` and saves `lights_on = true`.
 
 The "no resume events" warning in the log appears because the toolbox has no system bus. It doesn't happen in the installed service.
+
+## 1.4 On the keyboard (installed service)
+
+`packaging/install-service.sh` from this branch, user OK, 07:08:05. The existing `state.toml` (from change 2, with no `lights_on`) loaded as lights on, Ripple and game switch on.
+
+`lights_hardware_check.sh` (`lights_hardware_check.out`), with the user watching the keyboard:
+- `SetLightsOn false`: `LightsOn` false, keyboard dark.
+- `gamemode-simulate-game` while dark: `GameActive` stayed false, the keyboard stayed dark, and the log reads "game started; the lights are off" and "game ended; the lights are off".
+- `SetLightsOn true`: Ripple back.
+- Dark again, then `SetState` Ripple: `LightsOn` true, Ripple back.
+
+The user confirmed: "it went dark and came back".
+
+**Replug while dark.** The first attempt pulled the G512's USB pass-through plug: no kernel or service event, and the device nodes were unchanged. On the second attempt, with the keyboard plug, the service logged:
+
+```
+07:10:27.293 disconnected
+07:10:31.424 connected: G512 RGB MECHANICAL GAMING KEYBOARD on /dev/hidraw8, firmware U1 19.01 build 0014
+07:10:31.428 re-applied lighting (attempt 1)
+```
+
+The user confirmed: "replugged the keyboard plug, it stayed dark". The keyboard showed Off, not its firmware default.
+
+## 2.1 App Lights switch (AT-SPI)
+
+The Flatpak was rebuilt and reinstalled from this branch, and the app relaunched. `app_lights_check.sh` (`app_lights_check.out`):
+- The service started with the lights off, and the app's "Lights" switch was unchecked.
+- Flipping the switch over AT-SPI sent exactly one `SetLightsOn` call, with `true`. The service reported `LightsOn` true and the row became checked.
+- `busctl SetLightsOn false` unchecked the row, and `true` checked it again.
