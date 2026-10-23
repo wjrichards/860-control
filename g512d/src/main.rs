@@ -4,6 +4,8 @@
 mod controller;
 mod dbus;
 mod events;
+mod gamemode;
+mod keymap;
 mod state;
 mod store;
 
@@ -74,6 +76,9 @@ fn main() -> ExitCode {
     }
     if let Err(e) = events::spawn_resume(ctl.clone(), conn.clone()) {
         eprintln!("warning: no resume events ({e}); lighting will not be re-applied after suspend");
+    }
+    if let Err(e) = gamemode::spawn_gamemode(ctl.clone(), conn.clone()) {
+        eprintln!("warning: not following GameMode ({e}); the Gaming map will not switch on with games");
     }
 
     loop {

@@ -15,6 +15,8 @@ pub enum Error {
     EffectUnavailable(EffectKind),
     /// A speed or intensity value outside the range tested on the keyboard.
     OutOfRange { kind: EffectKind, what: &'static str, value: u16 },
+    /// A key usage ID outside the ANSI 104-key set.
+    InvalidKey(u8),
     /// The device replied with data this crate cannot interpret.
     Protocol(String),
 }
@@ -36,6 +38,7 @@ impl fmt::Display for Error {
             Error::OutOfRange { kind, what, value } => {
                 write!(f, "{what} {value} is outside the {} range", kind.name())
             }
+            Error::InvalidKey(usage) => write!(f, "key {usage:#04x} is not in the ANSI 104-key set"),
             Error::Protocol(msg) => write!(f, "unexpected reply: {msg}"),
         }
     }

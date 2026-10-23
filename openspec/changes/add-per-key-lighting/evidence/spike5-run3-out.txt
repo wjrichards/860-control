@@ -1,0 +1,32 @@
+[  0.01s] device /dev/hidraw1, PerKeyLighting slot 0x0c, ColorLedEffects slot 0x0d
+[  0.01s] STEP 0  baseline: Static white (0x8070)
+[  0.01s]   ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  3.01s] STEP 1  Left Ctrl red over Static white (6 s)
+[  3.02s]   set   ['ok 00 01 00 0e 00 00 00 00 00 00 00 00 00 00 00 00']
+[  3.02s]   commit ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  9.02s] STEP 2  effect Off, then Esc green (6 s)
+[  9.02s]   off   ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 10.03s]   set   ['ok 00 01 00 0e 00 00 00 00 00 00 00 00 00 00 00 00']
+[ 10.03s]   commit ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 15.03s] STEP 3a full frame, all 104 keys blue (4 s)
+[ 15.06s]   9 requests in 28 ms: {'ok': 9}
+[ 19.06s] STEP 3b fade: 40 full frames, blue 100% -> 20% -> 100%
+[ 20.19s]   40 frames in 1.13 s = 35.4 frames/s: {'ok': 360}
+[ 22.19s] STEP 4a start Wave (0x8070) over the blue frame (6 s)
+[ 22.20s]   wave  ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 28.20s] STEP 4b Left Ctrl red while Wave runs (6 s)
+[ 28.20s]   set   ['ok 00 01 00 0e 00 00 00 00 00 00 00 00 00 00 00 00']
+[ 28.21s]   commit ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 34.21s] STEP 5a effect Off, then every key white 100% (8 s): compare Left Ctrl
+[ 34.21s]   off   ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 34.24s]   {'ok': 9}
+[ 42.24s] STEP 5b every key white, Left Ctrl at 85% (8 s)
+[ 42.27s]   {'ok': 9}
+[ 50.27s] STEP 5c every key white, Left Ctrl at 70% (8 s)
+[ 50.29s]   {'ok': 9}
+[ 58.29s] STEP 6  keyboard amber: press the Game Mode key, wait, press it again (15 s)
+[ 58.32s]   {'ok': 9}
+[ 73.32s]   other reports (counted, not shown): none
+[ 73.32s] STEP 7  end: effect Off (g512d restores the saved lighting next)
+[ 73.33s]   off   ok 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 73.33s] done, 418 requests

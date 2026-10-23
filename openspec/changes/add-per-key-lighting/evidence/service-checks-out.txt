@@ -1,0 +1,19 @@
+[20:12:12.395] S1 SetKeys custom WASD green while Ripple shows: keyboard stays Ripple (4 s)
+[20:12:16.405] S2 SetState Custom: WASD green, every other key dark (5 s)
+b false
+[20:12:21.439] S3 SetKeys custom WASD + arrows: the arrows turn green too (5 s)
+[20:12:26.475] S4 v1-style SetState Static red: whole keyboard red (5 s)
+b false
+[20:12:31.486] S5 SetKeys custom WASD white while Static shows: keyboard stays red (4 s)
+[20:12:35.492] S6 Static white as a zone effect, no corrections: note Left Ctrl (7 s)
+b false
+[20:12:42.503] S7 corrections.toml e0 = 85, service restarted: Static white as a frame (8 s)
+[20:12:50.541] S8 hardware test: W A S D red, every other key dim white (5 s)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.05s
+[20:12:55.745] S9 back to Ripple, game switch on, simulated game: orange Gaming map for about 10 s, then Ripple
+b false
+[20:12:57.760]     game starts
+[20:13:07.859]     game ended
+[20:13:11.862] S10 game switch off; Ripple stays
+b false
+[20:13:11.876] done

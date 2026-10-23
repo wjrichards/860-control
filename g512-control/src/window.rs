@@ -1,4 +1,5 @@
-//! The main window: status pages for problems, otherwise the lighting controls.
+//! The main window: status pages for problems, otherwise the lighting
+//! controls, with the key-map editor as a second page.
 
 use std::{
     cell::{Cell, RefCell},
@@ -12,7 +13,8 @@ use gtk::{gdk, glib};
 use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
-    service::{self, BUS_NAME, DeviceState, EffectInfo, LightingProxy, LightingState, OBJECT_PATH},
+    editor::{Editor, MapName},
+    service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey},
     throttle::Throttle,
 };
 
@@ -47,12 +49,21 @@ pub struct Ui {
     speed_row: adw::ActionRow,
     speed: gtk::Scale,
     brightness: gtk::Scale,
+    nav: adw::NavigationView,
+    editor: Rc<Editor>,
+    keymaps_row: adw::ActionRow,
+    keymaps_button: gtk::Button,
+    games_group: adw::PreferencesGroup,
+    game_row: adw::SwitchRow,
+    banner: adw::Banner,
     effects: RefCell<Vec<EffectInfo>>,
     /// Set while the controls are updated from the service, so their change
     /// handlers do not send that state back.
     syncing: Cell<bool>,
     throttle: RefCell<Throttle<LightingState>>,
     flush_scheduled: Cell<bool>,
+    keys_throttle: RefCell<Throttle<(MapName, Keys)>>,
+    keys_flush_scheduled: Cell<bool>,
     bus: RefCell<Option<Rc<Bus>>>,
 }
 
@@ -98,8 +109,8 @@ impl Ui {
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("G512 Control")
-            .default_width(460)
-            .default_height(560)
+            .default_width(860)
+            .default_height(640)
             .build();
 
         let status_detail = gtk::Label::builder()
@@ -144,25 +155,56 @@ impl Ui {
         let brightness_row = adw::ActionRow::builder().title("Brightness").build();
         brightness_row.add_suffix(&brightness);
 
+        let keymaps_button = gtk::Button::builder()
+            .icon_name("go-next-symbolic")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        keymaps_button.update_property(&[gtk::accessible::Property::Label("Open Key Maps")]);
+        let keymaps_row = adw::ActionRow::builder()
+            .title("Key Maps")
+            .subtitle("Colour single keys for Custom and the Gaming layout")
+            .activatable_widget(&keymaps_button)
+            .build();
+        keymaps_row.add_suffix(&keymaps_button);
+
         let lighting_group = adw::PreferencesGroup::builder().title("Lighting").build();
         lighting_group.add(&effect_row);
         lighting_group.add(&color_row);
         lighting_group.add(&speed_row);
         lighting_group.add(&brightness_row);
+        lighting_group.add(&keymaps_row);
+
+        let game_row = adw::SwitchRow::builder()
+            .title("Switch to Gaming Layout While a Game Runs")
+            .subtitle("Games must use GameMode, for example with the Steam launch option gamemoderun %command%")
+            .build();
+        let games_group = adw::PreferencesGroup::builder().title("Games").build();
+        games_group.add(&game_row);
 
         let page = adw::PreferencesPage::new();
         page.add(&device_group);
         page.add(&lighting_group);
+        page.add(&games_group);
 
         let stack = gtk::Stack::new();
         stack.add_named(&status, Some("status"));
         stack.add_named(&page, Some("main"));
 
+        let banner = adw::Banner::new("Gaming layout active while a game runs");
+        banner.set_visible(false);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.add_top_bar(&banner);
         toolbar.set_content(Some(&stack));
+        let main_page = adw::NavigationPage::builder().title("G512 Control").tag("main").child(&toolbar).build();
+
+        let editor = Editor::new();
+        let nav = adw::NavigationView::new();
+        nav.add(&main_page);
+        nav.add(&editor.page);
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&toolbar));
+        toasts.set_child(Some(&nav));
         window.set_content(Some(&toasts));
 
         Ui {
@@ -180,10 +222,19 @@ impl Ui {
             speed_row,
             speed,
             brightness,
+            nav,
+            editor,
+            keymaps_row,
+            keymaps_button,
+            games_group,
+            game_row,
+            banner,
             effects: RefCell::new(Vec::new()),
             syncing: Cell::new(false),
             throttle: RefCell::new(Throttle::new(UPDATE_INTERVAL)),
             flush_scheduled: Cell::new(false),
+            keys_throttle: RefCell::new(Throttle::new(UPDATE_INTERVAL)),
+            keys_flush_scheduled: Cell::new(false),
             bus: RefCell::new(None),
         }
     }
@@ -203,6 +254,36 @@ impl Ui {
         self.speed.connect_value_changed(move |_| on_change(&w));
         let w = weak.clone();
         self.brightness.connect_value_changed(move |_| on_change(&w));
+        let w = weak.clone();
+        self.keymaps_button.connect_clicked(move |_| {
+            if let Some(ui) = w.upgrade() {
+                if ui.selected_effect().is_some_and(|e| e.name == CUSTOM) {
+                    ui.editor.set_target(MapName::Custom);
+                }
+                ui.nav.push_by_tag("keymaps");
+            }
+        });
+        let w = weak.clone();
+        self.game_row.connect_active_notify(move |row| {
+            let Some(ui) = w.upgrade() else { return };
+            if ui.syncing.get() {
+                return;
+            }
+            let Some(bus) = ui.bus.borrow().clone() else { return };
+            let on = row.is_active();
+            glib::spawn_future_local(async move {
+                if let Err(e) = bus.lighting.set_game_switch(on).await {
+                    ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                    ui.refresh().await;
+                }
+            });
+        });
+        let w = weak.clone();
+        self.editor.connect_edit(move |map, keys| {
+            if let Some(ui) = w.upgrade() {
+                ui.keys_changed(map, keys);
+            }
+        });
         let w = weak;
         self.retry.connect_clicked(move |_| {
             if let Some(ui) = w.upgrade() {
@@ -257,7 +338,8 @@ impl Ui {
                 eprintln!("lighting service unavailable: {e}");
                 self.show_status(Status::ServiceMissing);
             }
-            Ok(DeviceState::Connected { name, firmware, effects, state }) => {
+            Ok(DeviceState::Connected { name, firmware, effects, state, per_key }) => {
+                self.show_per_key(&effects, &per_key);
                 self.show_controls(&name, &firmware, effects, &state)
             }
             Ok(DeviceState::Disconnected) => self.show_status(Status::Disconnected),
@@ -339,6 +421,23 @@ impl Ui {
         self.syncing.set(false);
     }
 
+    /// Key maps, the game switch and the banner. Hidden on a service or
+    /// keyboard without the Custom effect.
+    fn show_per_key(&self, effects: &[EffectInfo], per_key: &PerKey) {
+        let supported = effects.iter().any(|e| e.name == CUSTOM);
+        self.keymaps_row.set_visible(supported);
+        self.games_group.set_visible(supported);
+        // Hidden as well as unrevealed, so screen readers skip it.
+        self.banner.set_visible(per_key.game_active);
+        self.banner.set_revealed(per_key.game_active);
+        self.syncing.set(true);
+        self.game_row.set_active(per_key.game_switch);
+        self.syncing.set(false);
+        if !self.keys_throttle.borrow().busy(Instant::now()) {
+            self.editor.set_maps(&per_key.custom, &per_key.gaming);
+        }
+    }
+
     fn selected_effect(&self) -> Option<EffectInfo> {
         self.effects.borrow().get(self.effect_row.selected() as usize).cloned()
     }
@@ -367,6 +466,9 @@ impl Ui {
             return;
         }
         self.update_visibility();
+        if self.selected_effect().is_some_and(|e| e.name == CUSTOM) {
+            self.editor.set_target(MapName::Custom);
+        }
         let Some(state) = self.current_state() else { return };
         let ready = self.throttle.borrow_mut().push(Instant::now(), state);
         if let Some(state) = ready {
@@ -404,6 +506,46 @@ impl Ui {
             let result =
                 bus.lighting.set_state(&state.effect, state.color, state.speed, state.brightness).await;
             if let Err(e) = result {
+                ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                ui.refresh().await;
+            }
+        });
+    }
+
+    fn keys_changed(self: Rc<Self>, map: MapName, keys: Keys) {
+        let ready = self.keys_throttle.borrow_mut().push(Instant::now(), (map, keys));
+        if let Some(edit) = ready {
+            self.send_keys(edit);
+        }
+        self.schedule_keys_flush();
+    }
+
+    fn schedule_keys_flush(self: &Rc<Self>) {
+        if self.keys_flush_scheduled.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(UPDATE_INTERVAL, move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.keys_flush_scheduled.set(false);
+            let held = ui.keys_throttle.borrow_mut().flush(Instant::now());
+            match held {
+                Some(edit) => {
+                    ui.send_keys(edit);
+                    ui.schedule_keys_flush();
+                }
+                None => {
+                    glib::spawn_future_local(async move { ui.refresh().await });
+                }
+            }
+        });
+    }
+
+    fn send_keys(self: &Rc<Self>, (map, keys): (MapName, Keys)) {
+        let Some(bus) = self.bus.borrow().clone() else { return };
+        let ui = self.clone();
+        glib::spawn_future_local(async move {
+            if let Err(e) = bus.lighting.set_keys(map.as_str(), &keys).await {
                 ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
                 ui.refresh().await;
             }

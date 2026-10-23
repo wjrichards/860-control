@@ -40,6 +40,13 @@ pub struct FakeKeyboard {
     pub applied: Vec<[u8; 16]>,
     /// When set, `setZoneEffect` is answered with this HID++ error code.
     pub reject_set_effect: Option<u8>,
+    /// Per-key entries (key, r, g, b) received since the last commit;
+    /// zero-key padding is left out.
+    staged_keys: Vec<[u8; 4]>,
+    /// Every committed per-key frame, in order.
+    pub frames: Vec<Vec<[u8; 4]>>,
+    /// When set, per-key "set keys" is answered with this HID++ error code.
+    pub reject_set_keys: Option<u8>,
 }
 
 impl FakeKeyboard {
@@ -75,6 +82,9 @@ impl FakeKeyboard {
             dropped: None,
             applied: Vec::new(),
             reject_set_effect: None,
+            staged_keys: Vec::new(),
+            frames: Vec::new(),
+            reject_set_keys: None,
         }
     }
 
@@ -114,10 +124,12 @@ impl FakeKeyboard {
     fn answer(&mut self, req: &[u8]) -> Vec<u8> {
         let (slot, function_sw) = (req[2], req[3]);
         let p = &req[4..];
+        // Replies come back in the request's report type.
+        let (report_id, len) = (req[0], req.len());
         let ok = |data: &[u8]| {
-            let mut r = vec![0x11, 0xff, slot, function_sw];
+            let mut r = vec![report_id, 0xff, slot, function_sw];
             r.extend_from_slice(data);
-            r.resize(20, 0);
+            r.resize(len, 0);
             r
         };
         let err = |code| {
@@ -179,6 +191,20 @@ impl FakeKeyboard {
                     }
                 }
             }
+            // "Set keys": header 00 01 00 0e, then 14 x (key, r, g, b).
+            (0x8080, 3) => match (req[0], &p[..4], self.reject_set_keys) {
+                (0x12, [0x00, 0x01, 0x00, 0x0e], None) => {
+                    let entries = p[4..60].chunks_exact(4).filter(|e| e[0] != 0);
+                    self.staged_keys.extend(entries.map(|e| [e[0], e[1], e[2], e[3]]));
+                    ok(&p[..4])
+                }
+                (0x12, [0x00, 0x01, 0x00, 0x0e], Some(code)) => err(code),
+                _ => err(ERR_INVALID_ARGUMENT),
+            },
+            (0x8080, 5) => {
+                self.frames.push(std::mem::take(&mut self.staged_keys));
+                ok(&[])
+            }
             _ => err(ERR_INVALID_FUNCTION_ID),
         }
     }
@@ -196,7 +222,11 @@ fn fw_entry(kind: u8, prefix: [u8; 3], number: u8, revision: u8, build: u16) -> 
 
 impl Transport for FakeKeyboard {
     fn send(&mut self, report: &[u8]) -> io::Result<()> {
-        assert_eq!(report.len(), 20, "requests are long reports");
+        match report[0] {
+            0x11 => assert_eq!(report.len(), 20, "long reports are 20 bytes"),
+            0x12 => assert_eq!(report.len(), 64, "very long reports are 64 bytes"),
+            id => panic!("report ID {id:#04x} is not a HID++ request"),
+        }
         self.sent.push(report.to_vec());
         let reply = self.answer(report);
         if std::mem::take(&mut self.drop_next) {

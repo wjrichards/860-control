@@ -14,7 +14,10 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_secs(1);
 const REPORT_LONG: u8 = 0x11;
 const REPORT_VERY_LONG: u8 = 0x12;
 const LONG_LEN: usize = 20;
+const VERY_LONG_LEN: usize = 64;
 const MAX_PARAMS: usize = LONG_LEN - 4;
+/// Parameter bytes a very long (`0x12`) request carries.
+pub const VERY_LONG_PARAMS: usize = VERY_LONG_LEN - 4;
 /// Marks a HID++ 2.0 error reply in the feature-index position.
 const ERROR_MARKER: u8 = 0xff;
 
@@ -60,8 +63,25 @@ impl<T: Transport> Device<T> {
 
     /// Call `function` of `feature` and return the 16 reply parameter bytes.
     pub fn request(&mut self, feature: Feature, function: u8, params: &[u8]) -> Result<[u8; 16]> {
-        assert!(function < 16, "HID++ function numbers are 4 bits");
         assert!(params.len() <= MAX_PARAMS, "long report carries at most {MAX_PARAMS} parameter bytes");
+        self.send_request::<LONG_LEN>(REPORT_LONG, feature, function, params)
+    }
+
+    /// Like [`Self::request`], sent as a very long (`0x12`, 64-byte) report
+    /// for up to [`VERY_LONG_PARAMS`] parameter bytes.
+    pub fn request_very_long(&mut self, feature: Feature, function: u8, params: &[u8]) -> Result<[u8; 16]> {
+        assert!(params.len() <= VERY_LONG_PARAMS, "very long report carries at most {VERY_LONG_PARAMS} bytes");
+        self.send_request::<VERY_LONG_LEN>(REPORT_VERY_LONG, feature, function, params)
+    }
+
+    fn send_request<const N: usize>(
+        &mut self,
+        report_id: u8,
+        feature: Feature,
+        function: u8,
+        params: &[u8],
+    ) -> Result<[u8; 16]> {
+        assert!(function < 16, "HID++ function numbers are 4 bits");
         let slot = self.slot(feature).ok_or(Error::FeatureMissing(feature))?;
         debug_assert!(Feature::ALL.contains(&feature));
 
@@ -70,8 +90,8 @@ impl<T: Transport> Device<T> {
         self.software_id = self.software_id % 15 + 1;
         let function_sw = function << 4 | self.software_id;
 
-        let mut report = [0u8; LONG_LEN];
-        report[..4].copy_from_slice(&[REPORT_LONG, DEVICE_INDEX, slot, function_sw]);
+        let mut report = [0u8; N];
+        report[..4].copy_from_slice(&[report_id, DEVICE_INDEX, slot, function_sw]);
         report[4..4 + params.len()].copy_from_slice(params);
         self.transport.send(&report)?;
 
@@ -143,6 +163,19 @@ mod tests {
         dev.transport_mut().queue_noise(other);
         let info = dev.request(Feature::ColorLedEffects, 0, &[]).unwrap();
         assert_eq!(info[0], 1);
+    }
+
+    #[test]
+    fn very_long_request_is_64_bytes() {
+        let mut dev = Device::open(FakeKeyboard::g512()).unwrap();
+        let mut params = vec![0x00, 0x01, 0x00, 0x0e];
+        params.resize(VERY_LONG_PARAMS, 0);
+        let reply = dev.request_very_long(Feature::PerKeyLighting, 3, &params).unwrap();
+        assert_eq!(reply[..4], [0x00, 0x01, 0x00, 0x0e]);
+        let sent = dev.transport_mut().sent().last().unwrap().clone();
+        assert_eq!(sent.len(), 64);
+        assert_eq!(sent[..3], [REPORT_VERY_LONG, DEVICE_INDEX, 0x0c]);
+        assert_eq!(sent[3] >> 4, 3);
     }
 
     #[test]
