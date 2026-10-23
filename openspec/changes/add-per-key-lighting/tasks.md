@@ -23,7 +23,7 @@
 - [x] 3.1 Add the GameMode watcher (session bus, no property caching, `NameHasOwner` before any read, re-reading `ClientCount` on `GameRegistered`, `GameUnregistered` and owner changes); verify with a unit test of the count → `game_override` state machine, including "SetState during a game clears it" and "switch off clears it"
 - [x] 3.2 Verify that GameMode is never activated: with `gamemoded` not running, start `g512d` and confirm with `busctl --user status com.feralinteractive.GameMode` that it is still not running after 30 s
 - [x] 3.3 Verify the switch with `gamemode-simulate-game`: switch on and state Ripple → the Gaming map is shown within 1 s of the game registering, and Ripple is back within 1 s of it ending; switch off → no change; record timings from the journal in `evidence/`
-- [ ] 3.4 Verify replug and resume during a game: with `gamemode-simulate-game` running a long game (or a real game), re-enumerate the keyboard and confirm the Gaming map returns within 3 s
+- [x] 3.4 Verify replug and resume during a game: with `gamemode-simulate-game` running a long game (or a real game), re-enumerate the keyboard and confirm the Gaming map returns within 3 s
 - [ ] 3.5 Hands-on: launch a Steam game with `gamemoderun %command%`, and confirm with the user that the keyboard switches to the Gaming map and back when the game is closed
 
 ## 4. App: key-map editor and game switch

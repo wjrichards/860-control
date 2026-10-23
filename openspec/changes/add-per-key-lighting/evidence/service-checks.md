@@ -43,4 +43,20 @@ S9 timings:
 
 So the Static frame with the correction looks the same as zone Static, apart from Left Ctrl matching the other keys. The correction can stay on Static, as designed.
 
-At the end, `State` read `"Ripple" 61 56 70 52 100`, with `GameSwitch` false and `GameActive` false. The user's `corrections.toml` (`e0 = 85`) stays in place.
+## Replug during a game (task 3.4), 20:44
+
+With the switch on, a fake game ran (`gamemoderun sleep 120`) and the Gaming map was shown from 20:44:13.29. The user unplugged and replugged the keyboard and confirmed the Gaming layout came back.
+
+| Time | Source | Event |
+|---|---|---|
+| 20:44:21.833 | kernel | `usb 5-3: USB disconnect` |
+| 20:44:21.922 | g512d | `disconnected` |
+| 20:44:30.085 | kernel | `hidraw6` created for interface 1 |
+| 20:44:30.612 | g512d | `connected: ... on /dev/hidraw6` |
+| 20:44:30.640 | g512d | Gaming map applied (`re-applied ... (attempt 1)`) |
+
+The Gaming map was back **0.55 s after the lighting interface appeared**. The log line then read "re-applied saved state" although it applied the Gaming map; it now reads "re-applied lighting".
+
+Resume goes through the same `reapply` → "what is due" path (the unit test `replug_during_a_game_shows_gaming_again` covers both). The machine was not suspended for this check.
+
+At the end of the earlier run, `State` read `"Ripple" 61 56 70 52 100`, with `GameSwitch` false and `GameActive` false. The user's `corrections.toml` (`e0 = 85`) stays in place.

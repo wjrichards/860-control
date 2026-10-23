@@ -81,13 +81,14 @@ impl UeventSocket {
     }
 }
 
-/// Re-apply the saved state with retries, then publish the result.
+/// Re-apply what is due (the saved state, or the Gaming map during a game)
+/// with retries, then publish the result.
 fn reapply_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
     let mut done = false;
     for attempt in 1..=ATTEMPTS {
         done = ctl.lock().unwrap_or_else(|e| e.into_inner()).reapply();
         if done {
-            eprintln!("re-applied saved state (attempt {attempt})");
+            eprintln!("re-applied lighting (attempt {attempt})");
             break;
         }
         if attempt < ATTEMPTS {
@@ -96,7 +97,7 @@ fn reapply_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
     }
     if !done {
         let status = ctl.lock().unwrap_or_else(|e| e.into_inner()).status();
-        eprintln!("could not re-apply saved state after {ATTEMPTS} attempts (keyboard {})", status.as_str());
+        eprintln!("could not re-apply lighting after {ATTEMPTS} attempts (keyboard {})", status.as_str());
     }
     notify(conn);
 }
