@@ -22,6 +22,7 @@ On GNOME Shell 50.6 (Wayland), a Shell extension is the only way to add a Quick 
   - it hides itself when the service isn't running.
   - The extension only talks to the service over D-Bus. It never opens the keyboard and keeps no settings of its own.
 - **A Lights switch in the app**, so the app shows and changes the same on/off setting.
+- **Fix: the service gives up at login.** If it starts before the login has granted access to the keyboard, it now keeps retrying for 15 s. This was found during the first real login of this change's testing: lighting wasn't restored until the service was restarted.
 - **Install and docs.** `packaging/install-extension.sh` packs and installs the extension. The README explains turning on extensions, the one logout, and enabling the tile.
 
 ## Capabilities

@@ -21,6 +21,23 @@ The service SHALL keep a lights-on setting, separate from the lighting state, th
 
 ## MODIFIED Requirements
 
+### Requirement: Unprivileged device access
+The service SHALL run as the logged-in user without root. Installation SHALL provide a udev rule that grants the active local session read/write access to the G512's hidraw nodes (USB ID `046d:c33c`) and to no other hidraw device.
+
+If permission is denied when the service starts, the service SHALL keep trying to open the keyboard for at least 10 seconds, because at login the session's access can arrive just after the service starts.
+
+#### Scenario: Active session user
+- **WHEN** the udev rule is installed and the user is logged in at the local seat
+- **THEN** the service opens the keyboard's lighting interface without elevated privileges
+
+#### Scenario: Access arrives just after start
+- **WHEN** the service starts at login before the session has been granted access to the keyboard, and access arrives a second later
+- **THEN** the service opens the keyboard and applies what is due within a few seconds, without a replug
+
+#### Scenario: Rule not installed
+- **WHEN** the service cannot open the lighting interface because permission is denied
+- **THEN** the service stays running, reports the device state as `permission-denied`, and front ends can show how to install the udev rule
+
 ### Requirement: D-Bus interface
 The service SHALL expose a session D-Bus interface that lets a front end:
 - read device state (`connected`, `disconnected`, `permission-denied` or `unsupported`) and, when connected, the device name and firmware version;

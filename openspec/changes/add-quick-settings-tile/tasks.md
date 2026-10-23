@@ -6,6 +6,7 @@
 - [x] 1.2 Save `lights_on` in `state.toml` (D1, Migration Plan); verify with store tests that a v1 file and a change-2 file both load with lights on, and that off round-trips
 - [x] 1.3 Add the `LightsOn` property and `SetLightsOn(b)` method (D2), emitted with the other properties; verify with a D-Bus test or `busctl` against a test instance that the value round-trips and a `PropertiesChanged` signal carries it
 - [x] 1.4 Install the service and check on the keyboard (user OK for the restart): off and on via `busctl`, replug while off stays dark, `gamemode-simulate-game` while off stays dark, and `SetState` while off lights it
+- [ ] 1.5 Retry opening the keyboard at startup while permission is denied (up to 15 s), found at the first real login of 4.3: g512d started at 10:46:42.869, the session's ACL arrived at 10:46:43, and the service stayed `permission-denied`. Verify with unit tests of the retry loop and, at the user's next login, a log line showing access arrived and the lighting restored without a restart
 
 ## 2. App: Lights switch
 
