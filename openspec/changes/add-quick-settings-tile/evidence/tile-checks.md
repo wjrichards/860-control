@@ -57,3 +57,10 @@ The task named `gnome-extensions info` as the check, but `info` needs a running 
 `gnome-extensions install` unpacks into the cache directory and then moves the result into the data directory. So the test puts its temporary cache on the same filesystem; `~/.cache` and `~/.local/share` already share one.
 
 An earlier version passed `--extra-source=logic.js` as a relative path, which `gnome-extensions pack` resolves against the current directory. The script now passes an absolute path.
+
+## 4.2 Workspace checks
+
+- `cargo clippy --workspace --all-targets -- -D warnings` in the GNOME 50 SDK: clean.
+- `cargo test --workspace` in the SDK: 84 passed (9 + 28 + 47), plus 2 hardware tests skipped as usual.
+- `gjs -m gnome-extension/tests/logic-test.js`: all 25 passed.
+- `openspec validate add-quick-settings-tile --strict` passes, and `openspec validate --specs --strict` gives 3 passed.

@@ -22,6 +22,6 @@
 
 ## 4. Docs and real-session check
 
-- [ ] 4.1 README: Quick Settings tile section (turn on extensions, install, log out and in, enable), the Lights switch, and the `SetLightsOn` `busctl` example
-- [ ] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
+- [x] 4.1 README: Quick Settings tile section (turn on extensions, install, log out and in, enable), the Lights switch, and the `SetLightsOn` `busctl` example
+- [x] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
 - [ ] 4.3 Real session with the user, after they turn on extensions, install and log out and in: the tile toggles the keyboard; effects, slider, game switch and "Lighting Settings" work; the app and tile stay in step; the tile follows light and dark style
