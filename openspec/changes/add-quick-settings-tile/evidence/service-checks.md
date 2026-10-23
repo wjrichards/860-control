@@ -67,3 +67,16 @@ The Flatpak was rebuilt and reinstalled from this branch, and the app relaunched
 - The service started with the lights off, and the app's "Lights" switch was unchecked.
 - Flipping the switch over AT-SPI sent exactly one `SetLightsOn` call, with `true`. The service reported `LightsOn` true and the row became checked.
 - `busctl SetLightsOn false` unchecked the row, and `true` checked it again.
+
+## 1.5 Login race (fixed, waiting for the next login)
+
+**At the first real login (10:46):** g512d started at 10:46:42.869 and reported `keyboard permission-denied`. The session's `uaccess` ACL landed on `hidraw7` and `hidraw8` at 10:46:43 (ctime, `user:wrichards:rw-`). No uevent followed, and at startup the service only tried once, so it stayed `permission-denied` and the lighting wasn't restored. A restart, with the user's OK, connected it at once.
+
+**The fix** (`2f68ab2`): when the first open at startup is denied, a `login-retry` thread retries `connect()` every 500 ms, up to 30 times. It stops at the first other status, and logs either "keyboard access arrived; keyboard connected (retry N)" or a give-up message.
+
+**Tests:** three unit tests of `retry_while_denied`:
+- it stops once access arrives;
+- it gives up after the limit;
+- it stops on other states, such as being unplugged.
+
+**Still to do:** install the fixed service and log out and in again. The journal should then show the "keyboard access arrived" line, with the lighting restored and no restart.

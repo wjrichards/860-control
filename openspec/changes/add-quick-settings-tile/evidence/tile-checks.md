@@ -61,6 +61,24 @@ An earlier version passed `--extra-source=logic.js` as a relative path, which `g
 ## 4.2 Workspace checks
 
 - `cargo clippy --workspace --all-targets -- -D warnings` in the GNOME 50 SDK: clean.
-- `cargo test --workspace` in the SDK: 84 passed (9 + 28 + 47), plus 2 hardware tests skipped as usual.
+- `cargo test --workspace` in the SDK: 84 passed (9 + 28 + 47), plus 2 hardware tests skipped as usual. After the login fix (1.5), a rerun in a fresh SDK sandbox gave 87 passed (9 + 28 + 50), with clippy still clean.
 - `gjs -m gnome-extension/tests/logic-test.js`: all 25 passed.
 - `openspec validate add-quick-settings-tile --strict` passes, and `openspec validate --specs --strict` gives 3 passed.
+
+## 4.3 Real session (open)
+
+**What is verified:**
+- After a full logout and login at 10:46:42, the tile loaded in the user's GNOME Shell 50.6: `gnome-extensions info` gives `State: ACTIVE`, with no JS errors or warnings from it in the journal.
+- Over AT-SPI, GNOME Shell's tree contains the tile: "Open keyboard lighting menu" (checked, since the lights are on), and a menu header with "Keyboard Lighting" and "G512 RGB MECHANICAL GAMING KEYBOARD".
+- GNOME's own keyboard-backlight tile reports brightness `-1` on this machine, so it stays hidden, and the tile is the only "Keyboard" in Quick Settings.
+
+**Found and fixed:**
+- The tile's slider had the accessible name "Keyboard Brightness", which is the same as GNOME's own backlight slider. It is now "Keyboard Lighting Brightness" (`07b0b7b`), and the nested checks still pass (29 of 29).
+- The login itself exposed the service bug fixed in 1.5.
+
+**Not yet verified: using the tile by hand.** GNOME 50 exposes no AT-SPI actions on Shell widgets, so the tile can't be clicked by script in the real session. The recordings (`record_calls.sh`) caught no calls from GNOME Shell. The 52 calls recorded between 12:11 and 12:19 all came from the app's Flatpak proxy:
+- 32 `SetState` (brightness);
+- 8 `SetGameSwitch`;
+- 12 `SetKeys gaming` (Gaming map edits).
+
+This task stays open until the user does the tile steps: toggle twice; choose Wave, then Ripple; drag the slider; flip the game switch; open Lighting Settings; check that the app follows; and check light and dark style.
