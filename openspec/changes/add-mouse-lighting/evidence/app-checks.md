@@ -26,3 +26,10 @@ The Flatpak was rebuilt from this branch and the app relaunched (22:32). The ser
 - **The checked state lags:** AT-SPI's checked state lagged behind the widget, so the service's properties and the recorded calls are the evidence. In the third run, toggles over AT-SPI stopped taking effect: `do_action` returned true and the switch didn't change. No popover or dialog was open, and the switch's states matched the Lights and Games switches. The second run's three working toggles stand. The switch is also in the hands-on pass.
 - **Hidden group:** the first app instance (started 22:32:26, during the service reinstall) had the Mouse group hidden. A relaunch showed it. Restarting the service with the app open didn't reproduce it, so it's noted, not fixed.
 - **Older service:** a service without mouse support hides the group. That follows from `optional("MouseState")` returning `None`, but it wasn't run against an old service.
+
+## 4.2 Workspace checks
+
+- `cargo clippy --workspace --all-targets -- -D warnings` in the GNOME 50 SDK: clean.
+- `cargo test --workspace` in the SDK: 115 passed (9 + 35 + 71), plus 2 hardware tests skipped as usual.
+- `gjs -m gnome-extension/tests/logic-test.js`: all passed. The tile is unchanged.
+- `openspec validate add-mouse-lighting --strict` passes, and `openspec validate --specs --strict` gives 4 passed.
