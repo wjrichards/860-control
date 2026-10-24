@@ -33,3 +33,20 @@ The Flatpak was rebuilt from this branch and the app relaunched (22:32). The ser
 - `cargo test --workspace` in the SDK: 115 passed (9 + 35 + 71), plus 2 hardware tests skipped as usual.
 - `gjs -m gnome-extension/tests/logic-test.js`: all passed. The tile is unchanged.
 - `openspec validate add-mouse-lighting --strict` passes, and `openspec validate --specs --strict` gives 4 passed.
+
+## 4.3 Hands-on pass with the user
+
+Recorded with `record_calls.sh` on 2026-10-24. The times are local, and every call came from the app:
+
+```
+06:49:33  SetState "Ripple" 61 56 70, speed 70, brightness 90 → 80 → 70   (the keyboard's Brightness slider)
+06:50:17  SetMouseMatch false
+06:50:26  SetMouseLighting "Static" 0 0 255, speed 40, brightness 100
+06:50:35  SetMouseMatch true
+```
+
+- The user turned Match Keyboard off.
+- They chose **Static** from the Effect list. That's the step AT-SPI couldn't drive, and the app sent `SetMouseLighting` with it. The colour stayed the blue from the hardware test; no other colour was picked.
+- They turned Match Keyboard back on: `MouseMatch` is true afterwards.
+- They checked light and dark style: their "done" covers it, since it can't be recorded as calls.
+- The keyboard brightness moved from 100 to 70 just before. The user was told, and it was left as they set it.
