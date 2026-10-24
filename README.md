@@ -1,17 +1,19 @@
 # g512-control
 
-Lighting control for the Logitech G512 RGB keyboard (USB `046d:c33c`) on a GNOME desktop.
+Lighting control for the Logitech G512 RGB keyboard (USB `046d:c33c`) and G502 HERO mouse (`046d:c08b`) on a GNOME desktop.
 
 It has four parts:
 
-- **`g512d`**: a user service that owns the keyboard. It applies lighting over HID++ 2.0, saves the last setting, and re-applies it when the keyboard is plugged back in or the computer wakes from suspend. It offers a session D-Bus interface, `io.github.g512control.Lighting1`.
-- **G512 Control** (`io.github.g512control.Control`): a GTK4/libadwaita app, packaged as a Flatpak. It talks to `g512d` over D-Bus and has no access to the keyboard itself.
+- **`g512d`**: a user service that owns the keyboard and the mouse. It applies lighting over HID++ 2.0, saves the last setting, and re-applies it when a device is plugged back in or the computer wakes from suspend. It offers a session D-Bus interface, `io.github.g512control.Lighting1`.
+- **G512 Control** (`io.github.g512control.Control`): a GTK4/libadwaita app, packaged as a Flatpak. It talks to `g512d` over D-Bus and has no access to the devices itself.
 - **Quick Settings tile** (`gnome-extension/`): an optional GNOME Shell 50 extension with the everyday controls. It also only talks to `g512d`.
 - **`g512-hidpp`**: the protocol library the service is built on.
 
 Effects: Off, Static, Breathe, Colour cycle, Wave, Ripple and Custom. Each has the colour and speed settings it supports, plus brightness. The keyboard has no brightness command of its own: brightness dims the colour, or for Cycle and Wave it sets their intensity.
 
 Custom shows a key map: a colour for each key, set in the app's **Key Maps** page. A second map, Gaming, can be shown automatically while a game runs.
+
+The mouse's logo and DPI strip can match the keyboard, or have their own Off, Static, Breathe or Cycle.
 
 Tested on firmware U1 19.01 build 0014, Fedora Silverblue 44 and GNOME 50.
 
@@ -21,14 +23,14 @@ You need Rust (`cargo`) on the host. The app also needs `org.flatpak.Builder`, `
 
 ### 1. udev rule (once, needs sudo)
 
-This lets the logged-in user open the keyboard, and only this keyboard. Details are in [packaging/INSTALL-udev.md](packaging/INSTALL-udev.md).
+This lets the logged-in user open the keyboard and the mouse, and no other device. Details are in [packaging/INSTALL-udev.md](packaging/INSTALL-udev.md). If you installed it before mouse support, run these commands again; the rule gained a line for the mouse.
 
 ```sh
 sudo install -m 0644 packaging/70-g512-control.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
 ```
 
-Then unplug and replug the keyboard.
+`udevadm trigger` applies it to devices that are already plugged in.
 
 ### 2. Service
 
@@ -78,6 +80,17 @@ The tile hides itself while `g512d` isn't running, and never starts it. After a 
 - While the lights are off, starting a game doesn't light the keyboard.
 - The keyboard stays dark after replugging, waking from suspend or logging in.
 - Choosing an effect or changing brightness, in the app, the tile or with `SetState`, turns the lights back on.
+
+## Mouse
+
+The **Mouse** section of the app appears when the service supports a G502 HERO. With **Match Keyboard** on, which is the default, the logo and DPI strip follow the keyboard's lighting and brightness. The mouse has only Off, Static, Breathe and Cycle, so it shows the nearest one:
+- **Wave** becomes Cycle at the same speed.
+- **Ripple** becomes Static in Ripple's colour.
+- **The Custom map, or the Gaming map during a game,** becomes Static in the colour that map gives W, or Off if W is off.
+
+With **Match Keyboard** off, choose the mouse's own effect, colour, speed and brightness. **Lights** off darkens the mouse too.
+
+The mouse stays in its own onboard-profile mode, so its DPI buttons keep working. Lighting set here isn't written to the mouse, and its stored profiles aren't touched. Unplugged, it shows its own lighting until the service re-applies it.
 
 ## Key maps
 
@@ -151,11 +164,19 @@ busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighti
 # Lights off, keeping everything else; `b true` turns them back on
 busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
     io.github.g512control.Lighting1 SetLightsOn b false
+
+# The mouse breathing blue on its own, then matching the keyboard again
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseLighting 's(yyy)yy' Breathe 0 0 255 40 100
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseMatch b true
 ```
 
 `SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running. `LightsOn` is false while the keyboard is dark.
 
-The saved state, both maps, the game switch and the lights setting are in `~/.config/g512-control/state.toml`.
+`MouseState`, `MouseName` and `MouseEffects` describe the mouse. `MouseMatch` is true while it follows the keyboard, and `MouseLighting` is its own setting. `SetMouseLighting` takes the same arguments as `SetState`. It turns matching off and the lights on.
+
+The saved state, both maps, the game switch, the lights setting and the mouse settings are in `~/.config/g512-control/state.toml`.
 
 ## Uninstall
 
@@ -171,9 +192,9 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 ## Things to know
 
 - **Don't run it alongside OpenRGB, g810-led or another lighting tool.** They write to the same keyboard and will overwrite each other.
-- **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects and PerKeyLighting. Of PerKeyLighting, only "set keys" and "commit" are used. The keyboard also has firmware-update, reset and hidden engineering features, which the code cannot address.
-- **Lighting is written to the keyboard's RAM only,** never to its stored settings.
-- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, and for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`.
+- **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects and PerKeyLighting. Of PerKeyLighting, only "set keys" and "commit" are used. Both devices also have firmware-update, reset and hidden engineering features, which the code cannot address. The mouse's DPI, report-rate and onboard-profile features aren't used yet.
+- **Lighting is written to the devices' RAM only,** never to their stored settings.
+- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`, and for the mouse in `openspec/changes/add-mouse-lighting/evidence/`. That last folder also holds a backup of the mouse's profile memory.
 - **Only the ANSI (US) layout** is drawn and addressed.
 
 ## Development

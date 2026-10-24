@@ -36,6 +36,6 @@
 
 ## 4. Docs and checks
 
-- [ ] 4.1 README: the mouse in the intro and in Things to know, the udev reinstall, mouse `busctl` examples, and the evidence path
+- [x] 4.1 README: the mouse in the intro and in Things to know, the udev reinstall, mouse `busctl` examples, and the evidence path
 - [ ] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
 - [ ] 4.3 Hands-on pass with the user in the app: match on and off, an own colour, and the Mouse section in light and dark style
