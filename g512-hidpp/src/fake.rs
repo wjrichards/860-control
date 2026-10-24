@@ -4,7 +4,11 @@
 //! read-only probes (`evidence/feature-table.txt`, `evidence/effects-out.txt`);
 //! [`FakeKeyboard::g502_hero`] what the mouse reported to spike 6.
 
-use std::{collections::VecDeque, io, time::Duration};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    io,
+    time::Duration,
+};
 
 use crate::Transport;
 
@@ -50,6 +54,17 @@ pub struct FakeKeyboard {
     pub frames: Vec<Vec<[u8; 4]>>,
     /// When set, per-key "set keys" is answered with this HID++ error code.
     pub reject_set_keys: Option<u8>,
+    /// OnboardProfiles memory by sector (the mouse only), and its state.
+    profile_memory: BTreeMap<u16, Vec<u8>>,
+    /// Reported by `getInfo`; 2 on the real mouse.
+    pub profile_format: u8,
+    pub current_profile: u8,
+    /// A write in progress: sector and the bytes received so far.
+    pending_write: Option<(u16, Vec<u8>)>,
+    /// Sectors committed by `memoryWriteEnd`, in order.
+    pub profile_writes: Vec<u16>,
+    /// Flip one byte of the next committed write, to test read-back checks.
+    pub corrupt_next_write: bool,
 }
 
 impl FakeKeyboard {
@@ -89,6 +104,12 @@ impl FakeKeyboard {
             staged_keys: Vec::new(),
             frames: Vec::new(),
             reject_set_keys: None,
+            profile_memory: BTreeMap::new(),
+            profile_format: 2,
+            current_profile: 4,
+            pending_write: None,
+            profile_writes: Vec::new(),
+            corrupt_next_write: false,
         }
     }
 
@@ -109,8 +130,21 @@ impl FakeKeyboard {
             firmware: vec![fw_entry(0, *b"U1 ", 0x27, 0x03, 0x0010), fw_entry(1, *b"BOT", 0x81, 0x00, 0x0002)],
             lighting_info: [0x02, 0x00, 0x03, 0x00, 0x00],
             zones: vec![zone(0x0001), zone(0x0002)],
+            profile_memory: g502_hero_memory(),
             ..FakeKeyboard::g512()
         }
+    }
+
+    /// A user sector's bytes, as the fake mouse holds them now.
+    pub fn sector(&self, sector: u16) -> Option<&[u8]> {
+        self.profile_memory.get(&sector).map(Vec::as_slice)
+    }
+
+    /// The current profile's default DPI, as AdjustableDpi would report it.
+    fn current_dpi(&self) -> u16 {
+        let Some(p) = self.profile_memory.get(&u16::from(self.current_profile)) else { return 0 };
+        let i = 3 + 2 * usize::from(p[1]);
+        u16::from_le_bytes([p[i], p[i + 1]])
     }
 
     /// Simulate firmware without `feature_id`; later features move up a slot.
@@ -231,9 +265,80 @@ impl FakeKeyboard {
                 self.frames.push(std::mem::take(&mut self.staged_keys));
                 ok(&[])
             }
+            // AdjustableDpi: one sensor, 100 to 25600 in steps of 50.
+            (0x2201, 0) => ok(&[1]),
+            (0x2201, 1) => ok(&[0, 0x00, 0x64, 0xe0, 0x32, 0x64, 0x00]),
+            (0x2201, 2) => {
+                let [hi, lo] = self.current_dpi().to_be_bytes();
+                ok(&[0, hi, lo, 0x03, 0xe8])
+            }
+            // OnboardProfiles, as the user's mouse reported it (spike 6).
+            (0x8100, 0) => ok(&[0x01, self.profile_format, 0x01, 0x05, 0x05, 0x0b, 0x10, 0x01, 0x00, 0x0a, 0x01]),
+            (0x8100, 2) => ok(&[1]),
+            (0x8100, 3) => match (p[0], p[1]) {
+                (0, n @ 1..=5) => {
+                    self.current_profile = n;
+                    ok(&[])
+                }
+                _ => err(ERR_INVALID_ARGUMENT),
+            },
+            (0x8100, 4) => ok(&[0, self.current_profile]),
+            (0x8100, 5) => {
+                let (sector, offset) = (u16::from_be_bytes([p[0], p[1]]), usize::from(u16::from_be_bytes([p[2], p[3]])));
+                match self.profile_memory.get(&sector).and_then(|d| d.get(offset..offset + 16)) {
+                    Some(chunk) => ok(chunk),
+                    None => err(ERR_INVALID_ARGUMENT),
+                }
+            }
+            (0x8100, 6) => {
+                let sector = u16::from_be_bytes([p[0], p[1]]);
+                // The real mouse's ROM sectors are read-only.
+                if sector >= 0x100 || !self.profile_memory.contains_key(&sector) || p[2..6] != [0, 0, 1, 0] {
+                    return err(ERR_INVALID_ARGUMENT);
+                }
+                self.pending_write = Some((sector, Vec::new()));
+                ok(&[])
+            }
+            (0x8100, 7) => match self.pending_write.as_mut() {
+                Some((_, data)) => {
+                    data.extend_from_slice(&p[..16]);
+                    ok(&[])
+                }
+                None => err(ERR_INVALID_ARGUMENT),
+            },
+            (0x8100, 8) => match self.pending_write.take() {
+                Some((sector, mut data)) if data.len() == 256 => {
+                    if std::mem::take(&mut self.corrupt_next_write) {
+                        data[20] ^= 0xff;
+                    }
+                    self.profile_memory.insert(sector, data);
+                    self.profile_writes.push(sector);
+                    ok(&[])
+                }
+                _ => err(ERR_INVALID_ARGUMENT),
+            },
             _ => err(ERR_INVALID_FUNCTION_ID),
         }
     }
+}
+
+/// The mouse's sectors 0-5 from spike 6, then ten empty user sectors and
+/// a stand-in ROM sector.
+fn g502_hero_memory() -> BTreeMap<u16, Vec<u8>> {
+    let mut memory: BTreeMap<u16, Vec<u8>> = include_str!("fixtures/g502_hero_profiles.txt")
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| {
+            let (sector, hex) = l.split_once(' ').expect("sector and bytes");
+            let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+            (u16::from_str_radix(sector, 16).unwrap(), bytes)
+        })
+        .collect();
+    for sector in 6..16 {
+        memory.insert(sector, vec![0; 256]);
+    }
+    memory.insert(0x101, vec![0xff; 256]);
+    memory
 }
 
 fn fw_entry(kind: u8, prefix: [u8; 3], number: u8, revision: u8, build: u16) -> [u8; 16] {

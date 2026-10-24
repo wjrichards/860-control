@@ -15,6 +15,7 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 use crate::{
     editor::{Editor, MapName},
     mouse_section::MouseSection,
+    profile_section::ProfileSection,
     service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey},
     throttle::Throttle,
 };
@@ -54,6 +55,7 @@ pub struct Ui {
     nav: adw::NavigationView,
     editor: Rc<Editor>,
     mouse_section: Rc<MouseSection>,
+    profile_section: Rc<ProfileSection>,
     keymaps_row: adw::ActionRow,
     keymaps_button: gtk::Button,
     games_group: adw::PreferencesGroup,
@@ -193,6 +195,8 @@ impl Ui {
         page.add(&games_group);
         let mouse_section = MouseSection::new();
         page.add(&mouse_section.group);
+        let profile_section = ProfileSection::new();
+        page.add(&profile_section.group);
 
         let stack = gtk::Stack::new();
         stack.add_named(&status, Some("status"));
@@ -233,6 +237,7 @@ impl Ui {
             nav,
             editor,
             mouse_section,
+            profile_section,
             keymaps_row,
             keymaps_button,
             games_group,
@@ -308,6 +313,31 @@ impl Ui {
                 ui.keys_changed(map, keys);
             }
         });
+        let (on_switch, on_save) = (weak.clone(), weak.clone());
+        self.profile_section.connect(
+            move |number| {
+                let Some(ui) = on_switch.upgrade() else { return };
+                let Some(bus) = ui.bus.borrow().clone() else { return };
+                glib::spawn_future_local(async move {
+                    if let Err(e) = bus.lighting.set_mouse_active_profile(number).await {
+                        ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                    }
+                    ui.refresh().await;
+                });
+            },
+            move |(number, edit)| {
+                let Some(ui) = on_save.upgrade() else { return };
+                let Some(bus) = ui.bus.borrow().clone() else { return };
+                glib::spawn_future_local(async move {
+                    let result =
+                        bus.lighting.set_mouse_profile(number, edit.report_rate_ms, edit.default_index, &edit.dpis).await;
+                    if let Err(e) = result {
+                        ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                    }
+                    ui.refresh().await;
+                });
+            },
+        );
         let (on_match, on_lighting, on_idle) = (weak.clone(), weak.clone(), weak.clone());
         self.mouse_section.connect(
             move |on| {
@@ -395,6 +425,7 @@ impl Ui {
             Ok(DeviceState::Connected { name, firmware, effects, state, per_key, lights_on, mouse }) => {
                 self.show_lights(lights_on);
                 self.mouse_section.show(mouse.as_deref());
+                self.profile_section.show(mouse.as_deref());
                 self.show_per_key(&effects, &per_key);
                 self.show_controls(&name, &firmware, effects, &state)
             }

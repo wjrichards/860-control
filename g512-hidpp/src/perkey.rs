@@ -204,11 +204,13 @@ mod tests {
     }
 
     #[test]
-    fn other_per_key_functions_are_refused_by_the_fake() {
+    fn other_per_key_functions_are_never_sent() {
         let mut dev = Device::open(FakeKeyboard::g512()).unwrap();
+        let sent = dev.transport_mut().sent().len();
         assert!(matches!(
             dev.request(Feature::PerKeyLighting, 1, &[]),
-            Err(Error::Hidpp { feature: Feature::PerKeyLighting, function: 1, code: 0x07 })
+            Err(Error::FunctionNotAllowed { feature: Feature::PerKeyLighting, function: 1 })
         ));
+        assert_eq!(dev.transport_mut().sent().len(), sent, "refused before sending");
     }
 }

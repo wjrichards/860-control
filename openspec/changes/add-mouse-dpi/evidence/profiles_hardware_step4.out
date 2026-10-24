@@ -1,0 +1,16 @@
+start: current DPI 800, active profile 4, DPI index 0
+SetMouseActiveProfile 1: MouseActiveProfile y 1, mouse: current DPI 2400, active profile 1, DPI index 1
+SetMouseActiveProfile 4: MouseActiveProfile y 4, mouse: current DPI 800, active profile 4, DPI index 0
+--- restore:
+  mouse on /dev/hidraw3
+  sector 0x0000: Skipped("not a user profile sector")
+  sector 0x0001: Unchanged
+  sector 0x0002: Unchanged
+  sector 0x0003: Unchanged
+  sector 0x0004: Written
+  sector 0x0005: Written
+  the running service has re-read the profiles
+after restore: MouseProfiles a(yyyaq) 5 1 1 1 4 1200 2400 3200 6400 2 1 2 4 400 800 1600 2400 3 2 0 1 2400 4 1 0 1 3200 5 1 0 1 6400
+mouse: current DPI 3200, active profile 4, DPI index 0
+backup still equals spike 6: True
+--- service log:

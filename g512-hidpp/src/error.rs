@@ -11,6 +11,8 @@ pub enum Error {
     Hidpp { feature: Feature, function: u8, code: u8 },
     /// The device does not implement this feature.
     FeatureMissing(Feature),
+    /// The function is not on the feature's allowlist; nothing was sent.
+    FunctionNotAllowed { feature: Feature, function: u8 },
     /// The zone does not offer this effect.
     EffectUnavailable(EffectKind),
     /// A speed or intensity value outside the range tested on the keyboard.
@@ -19,6 +21,12 @@ pub enum Error {
     InvalidKey(u8),
     /// The device replied with data this crate cannot interpret.
     Protocol(String),
+    /// An onboard profile layout other than format 2.
+    UnsupportedProfileFormat(u8),
+    /// A profile, sector or profile edit that this crate refuses.
+    InvalidProfile(String),
+    /// A written profile sector read back differently.
+    WriteNotVerified { sector: u16 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -34,12 +42,18 @@ impl fmt::Display for Error {
                 write!(f, "HID++ error {code:#04x} from {feature} function {function}")
             }
             Error::FeatureMissing(feature) => write!(f, "device does not support {feature}"),
+            Error::FunctionNotAllowed { feature, function } => {
+                write!(f, "{feature} function {function} is not allowed")
+            }
             Error::EffectUnavailable(kind) => write!(f, "zone does not offer the {} effect", kind.name()),
             Error::OutOfRange { kind, what, value } => {
                 write!(f, "{what} {value} is outside the {} range", kind.name())
             }
             Error::InvalidKey(usage) => write!(f, "key {usage:#04x} is not in the ANSI 104-key set"),
             Error::Protocol(msg) => write!(f, "unexpected reply: {msg}"),
+            Error::UnsupportedProfileFormat(n) => write!(f, "onboard profile format {n} is not supported"),
+            Error::InvalidProfile(msg) => write!(f, "invalid profile: {msg}"),
+            Error::WriteNotVerified { sector } => write!(f, "profile sector {sector} read back differently"),
         }
     }
 }

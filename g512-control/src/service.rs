@@ -24,6 +24,8 @@ pub trait Lighting {
     fn set_lights_on(&self, on: bool) -> zbus::Result<()>;
     fn set_mouse_match(&self, on: bool) -> zbus::Result<()>;
     fn set_mouse_lighting(&self, effect: &str, color: (u8, u8, u8), speed: u8, brightness: u8) -> zbus::Result<bool>;
+    fn set_mouse_active_profile(&self, profile: u8) -> zbus::Result<()>;
+    fn set_mouse_profile(&self, profile: u8, report_rate_ms: u8, default_index: u8, dpis: &[u16]) -> zbus::Result<()>;
 }
 
 /// The Custom effect's name on the bus.
@@ -69,6 +71,21 @@ pub struct Mouse {
     pub matching: bool,
     /// Its own setting, shown while not matching.
     pub lighting: LightingState,
+    /// Onboard profiles; empty on a service without them, or when they
+    /// can't be read.
+    pub profiles: Vec<MouseProfile>,
+    /// 1-based; 0 when unknown.
+    pub active_profile: u8,
+    /// (min, max, step); zeros when unknown.
+    pub dpi_range: (u16, u16, u16),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MouseProfile {
+    pub number: u8,
+    pub report_rate_ms: u8,
+    pub default_index: u8,
+    pub dpis: Vec<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +132,18 @@ pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> 
                     effects: parse_effects(get("MouseEffects")?)?,
                     matching: get("MouseMatch")?.try_into()?,
                     lighting: parse_state(get("MouseLighting")?)?,
+                    profiles: optional::<Vec<(u8, u8, u8, Vec<u16>)>>(&all, "MouseProfiles")?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(number, report_rate_ms, default_index, dpis)| MouseProfile {
+                            number,
+                            report_rate_ms,
+                            default_index,
+                            dpis,
+                        })
+                        .collect(),
+                    active_profile: optional(&all, "MouseActiveProfile")?.unwrap_or(0),
+                    dpi_range: optional(&all, "MouseDpiRange")?.unwrap_or((0, 0, 0)),
                 })),
                 None => None,
             },

@@ -1,0 +1,14 @@
+before: a(yyyaq) 5 1 1 1 4 1200 2400 3200 6400 2 1 2 4 400 800 1600 2400 3 2 0 1 2400 4 1 0 1 3200 5 1 0 1 6400
+Add Step activated at 07:46:27.812
+--- calls (seconds after Add Step):
+after: a(yyyaq) 5 1 1 1 4 1200 2400 3200 6400 2 1 2 4 400 800 1600 2400 3 2 0 1 2400 4 1 0 1 3200 5 1 0 1 6400
+--- restore:
+  mouse on /dev/hidraw3
+  sector 0x0000: Skipped("not a user profile sector")
+  sector 0x0001: Unchanged
+  sector 0x0002: Unchanged
+  sector 0x0003: Unchanged
+  sector 0x0004: Unchanged
+  sector 0x0005: Unchanged
+  the running service has re-read the profiles
+restored: a(yyyaq) 5 1 1 1 4 1200 2400 3200 6400 2 1 2 4 400 800 1600 2400 3 2 0 1 2400 4 1 0 1 3200 5 1 0 1 6400

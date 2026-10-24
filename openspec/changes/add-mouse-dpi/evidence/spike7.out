@@ -1,0 +1,16 @@
+[  0.0s] device /dev/hidraw3: OnboardProfiles slot 0x0c, AdjustableDpi slot 0x0a
+[  0.0s] mode 1 (1 = onboard), current profile 00 04, DPI 3200
+[  0.1s] sector 5 read: crc ok, equals spike 6 backup: True
+[  0.1s] edit: first DPI step 6400 -> 6000; bytes changed at [3, 4, 254, 255]
+[  0.1s] writing the edited sector 5
+[  0.1s]   memoryAddrWrite reply 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  0.4s]   memoryWriteEnd reply 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  0.4s] read back: equals the edit True, crc ok, first DPI step 6000
+[  0.4s] restoring the original sector 5
+[  0.4s]   memoryAddrWrite reply 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  0.7s]   memoryWriteEnd reply 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[  0.8s] restored: equals spike 6 backup True, crc ok
+[  0.8s] profile switching: to profile 1, then back
+[  2.0s]   after setCurrentProfile 1: current 00 01, DPI 2400
+[  6.2s]   after setCurrentProfile 00 04: current 00 04, DPI 3200, mode 1
+[  6.2s] done

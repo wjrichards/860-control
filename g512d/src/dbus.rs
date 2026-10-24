@@ -45,7 +45,9 @@ fn effect_list(effects: Vec<Effect>) -> Vec<(String, bool, bool, u8, u8)> {
 fn set_error(e: SetError) -> fdo::Error {
     match e {
         SetError::Invalid(e) => fdo::Error::InvalidArgs(e.to_string()),
-        SetError::Device(e) => fdo::Error::Failed(format!("keyboard refused the change: {e}")),
+        SetError::Device(e) => fdo::Error::Failed(format!("the device refused the change: {e}")),
+        SetError::Profile(msg) => fdo::Error::InvalidArgs(msg),
+        SetError::Backup(e) => fdo::Error::Failed(format!("could not save the profile backup, so nothing was written: {e}")),
     }
 }
 
@@ -75,7 +77,10 @@ impl Lighting {
         self.mouse_name_changed(emitter).await?;
         self.mouse_effects_changed(emitter).await?;
         self.mouse_match_changed(emitter).await?;
-        self.mouse_lighting_changed(emitter).await
+        self.mouse_lighting_changed(emitter).await?;
+        self.mouse_profiles_changed(emitter).await?;
+        self.mouse_active_profile_changed(emitter).await?;
+        self.mouse_dpi_range_changed(emitter).await
     }
 }
 
@@ -230,6 +235,55 @@ impl Lighting {
     async fn mouse_lighting(&self) -> (String, (u8, u8, u8), u8, u8) {
         let s = self.ctl().mouse_own();
         (s.effect.name().to_string(), (s.color.r, s.color.g, s.color.b), s.speed, s.brightness)
+    }
+
+    /// The mouse's onboard profiles: (number, report period in ms, default
+    /// step index, DPI steps). Empty when unknown.
+    #[zbus(property)]
+    async fn mouse_profiles(&self) -> Vec<(u8, u8, u8, Vec<u16>)> {
+        let ctl = self.ctl();
+        let views = ctl.mouse_profiles().map(|p| p.views()).unwrap_or_default();
+        views.into_iter().map(|v| (v.number, v.report_rate_ms, v.default_index, v.dpis)).collect()
+    }
+
+    /// The active profile, 1-based; 0 when unknown.
+    #[zbus(property)]
+    async fn mouse_active_profile(&self) -> u8 {
+        self.ctl().mouse_profiles().map_or(0, |p| p.active)
+    }
+
+    /// The sensor's DPI range: (min, max, step); zeros when unknown.
+    #[zbus(property)]
+    async fn mouse_dpi_range(&self) -> (u16, u16, u16) {
+        self.ctl().mouse_profiles().map_or((0, 0, 0), |p| (p.dpi_range.min, p.dpi_range.max, p.dpi_range.step))
+    }
+
+    /// Make a profile (1-based) the mouse's active one.
+    async fn set_mouse_active_profile(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        profile: u8,
+    ) -> fdo::Result<()> {
+        let result = self.ctl().set_mouse_active_profile(profile);
+        result.map_err(set_error)?;
+        self.emit_all(&emitter).await?;
+        Ok(())
+    }
+
+    /// Write a profile's report period (1, 2, 4 or 8 ms), default step and
+    /// 1 to 5 DPI steps to the mouse. The first write ever saves a backup.
+    async fn set_mouse_profile(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        profile: u8,
+        report_rate_ms: u8,
+        default_index: u8,
+        dpis: Vec<u16>,
+    ) -> fdo::Result<()> {
+        let result = self.ctl().set_mouse_profile(profile, report_rate_ms, default_index, &dpis);
+        result.map_err(set_error)?;
+        self.emit_all(&emitter).await?;
+        Ok(())
     }
 
     async fn set_mouse_match(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, on: bool) -> fdo::Result<()> {
