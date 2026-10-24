@@ -11,6 +11,8 @@ pub enum Error {
     Hidpp { feature: Feature, function: u8, code: u8 },
     /// The device does not implement this feature.
     FeatureMissing(Feature),
+    /// The function is not on the feature's allowlist; nothing was sent.
+    FunctionNotAllowed { feature: Feature, function: u8 },
     /// The zone does not offer this effect.
     EffectUnavailable(EffectKind),
     /// A speed or intensity value outside the range tested on the keyboard.
@@ -34,6 +36,9 @@ impl fmt::Display for Error {
                 write!(f, "HID++ error {code:#04x} from {feature} function {function}")
             }
             Error::FeatureMissing(feature) => write!(f, "device does not support {feature}"),
+            Error::FunctionNotAllowed { feature, function } => {
+                write!(f, "{feature} function {function} is not allowed")
+            }
             Error::EffectUnavailable(kind) => write!(f, "zone does not offer the {} effect", kind.name()),
             Error::OutOfRange { kind, what, value } => {
                 write!(f, "{what} {value} is outside the {} range", kind.name())

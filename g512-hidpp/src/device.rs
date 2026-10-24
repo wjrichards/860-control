@@ -82,6 +82,9 @@ impl<T: Transport> Device<T> {
         params: &[u8],
     ) -> Result<[u8; 16]> {
         assert!(function < 16, "HID++ function numbers are 4 bits");
+        if !feature.allows(function) {
+            return Err(Error::FunctionNotAllowed { feature, function });
+        }
         let slot = self.slot(feature).ok_or(Error::FeatureMissing(feature))?;
         debug_assert!(Feature::ALL.contains(&feature));
 
@@ -218,5 +221,27 @@ mod tests {
             let id = u16::from_be_bytes([report[4], report[5]]);
             assert!(Feature::ALL.iter().any(|f| f.id() == id), "getFeature({id:#06x})");
         }
+    }
+
+    #[test]
+    fn disallowed_functions_are_never_sent() {
+        let mut dev = Device::open(FakeKeyboard::g502_hero()).unwrap();
+        assert!(dev.supports(Feature::OnboardProfiles) && dev.supports(Feature::AdjustableDpi));
+        let sent = dev.transport_mut().sent().len();
+        for (feature, function) in [
+            (Feature::OnboardProfiles, 1),
+            (Feature::OnboardProfiles, 9),
+            (Feature::OnboardProfiles, 10),
+            (Feature::OnboardProfiles, 12),
+            (Feature::OnboardProfiles, 15),
+            (Feature::AdjustableDpi, 3),
+            (Feature::PerKeyLighting, 0),
+        ] {
+            match dev.request(feature, function, &[]) {
+                Err(Error::FunctionNotAllowed { feature: f, function: n }) => assert_eq!((f, n), (feature, function)),
+                other => panic!("{feature} fn{function}: {other:?}"),
+            }
+        }
+        assert_eq!(dev.transport_mut().sent().len(), sent, "nothing sent");
     }
 }
