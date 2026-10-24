@@ -1,9 +1,10 @@
-//! Keyboard hotplug (kernel uevents over netlink), resume (logind), and
-//! access arriving just after login.
+//! Keyboard and mouse hotplug (kernel uevents over netlink), resume (logind),
+//! and access arriving just after login.
 
 use std::{
     io,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    path::Path,
     thread,
     time::Duration,
 };
@@ -88,6 +89,45 @@ impl UeventSocket {
     }
 }
 
+/// Which device a removed hidraw node belonged to.
+#[derive(Debug, PartialEq, Eq)]
+enum Removed {
+    Keyboard,
+    Mouse,
+}
+
+/// Match a removed node's name against the keyboard's and the mouse's paths.
+fn removed_device(devname: &str, keyboard: Option<&Path>, mouse: Option<&Path>) -> Option<Removed> {
+    let ours = |p: Option<&Path>| p.and_then(|p| p.file_name()).is_some_and(|f| *f == *devname);
+    if ours(keyboard) {
+        Some(Removed::Keyboard)
+    } else if ours(mouse) {
+        Some(Removed::Mouse)
+    } else {
+        None
+    }
+}
+
+/// Re-apply the mouse with retries while access is still being granted.
+/// Quiet when there is simply no mouse.
+fn reapply_mouse_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
+    for attempt in 1..=ATTEMPTS {
+        let mut c = ctl.lock().unwrap_or_else(|e| e.into_inner());
+        if c.reapply_mouse() {
+            eprintln!("re-applied mouse lighting (attempt {attempt})");
+            break;
+        }
+        if c.mouse_status() == DeviceStatus::Disconnected {
+            break;
+        }
+        drop(c);
+        if attempt < ATTEMPTS {
+            thread::sleep(RETRY_DELAY);
+        }
+    }
+    notify(conn);
+}
+
 /// Re-apply what is due (the saved state, or the Gaming map during a game)
 /// with retries, then publish the result.
 fn reapply_with_retries(ctl: &Shared, conn: &zbus::blocking::Connection) {
@@ -130,20 +170,29 @@ pub fn spawn_hotplug(ctl: Shared, conn: zbus::blocking::Connection) -> io::Resul
             }
             match ev.action.as_str() {
                 "add" => {
-                    let connected = ctl.lock().unwrap_or_else(|e| e.into_inner()).device_path().is_some();
-                    if !connected {
+                    let (keyboard, mouse) = {
+                        let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
+                        (c.device_path().is_some(), c.mouse_path().is_some())
+                    };
+                    if !keyboard || !mouse {
                         thread::sleep(HOTPLUG_SETTLE);
+                    }
+                    if !keyboard {
                         reapply_with_retries(&ctl, &conn);
+                    }
+                    if !mouse {
+                        reapply_mouse_with_retries(&ctl, &conn);
                     }
                 }
                 "remove" => {
                     let mut c = ctl.lock().unwrap_or_else(|e| e.into_inner());
-                    let ours = c.device_path().and_then(|p| p.file_name()).is_some_and(|f| *f == *ev.devname);
-                    if ours {
-                        c.disconnect();
-                        drop(c);
-                        notify(&conn);
+                    match removed_device(&ev.devname, c.device_path(), c.mouse_path()) {
+                        Some(Removed::Keyboard) => c.disconnect(),
+                        Some(Removed::Mouse) => c.disconnect_mouse(),
+                        None => continue,
                     }
+                    drop(c);
+                    notify(&conn);
                 }
                 _ => {}
             }
@@ -152,24 +201,36 @@ pub fn spawn_hotplug(ctl: Shared, conn: zbus::blocking::Connection) -> io::Resul
     Ok(())
 }
 
-/// If the keyboard was there but not ours to open when the service started,
-/// retry until access arrives (or give up after `LOGIN_ATTEMPTS`).
+/// If the keyboard or mouse was there but not ours to open when the service
+/// started, retry until access arrives (or give up after `LOGIN_ATTEMPTS`).
 pub fn spawn_login_retry(ctl: Shared, conn: zbus::blocking::Connection) -> io::Result<()> {
     thread::Builder::new().name("login-retry".into()).spawn(move || {
         let (attempt, status) = retry_while_denied(LOGIN_ATTEMPTS, || {
             thread::sleep(RETRY_DELAY);
             let mut c = ctl.lock().unwrap_or_else(|e| e.into_inner());
             c.connect();
-            c.status()
+            c.connect_mouse();
+            either_denied(c.status(), c.mouse_status())
         });
+        let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
+        let (keyboard, mouse) = (c.status().as_str(), c.mouse_status().as_str());
+        drop(c);
         if status == DeviceStatus::PermissionDenied {
-            eprintln!("still no permission to open the keyboard after {attempt} retries; replug it or check the udev rule");
+            eprintln!(
+                "still no permission after {attempt} retries (keyboard {keyboard}, mouse {mouse}); \
+                 replug it or check the udev rule"
+            );
         } else {
-            eprintln!("keyboard access arrived; keyboard {} (retry {attempt})", status.as_str());
+            eprintln!("access arrived; keyboard {keyboard}, mouse {mouse} (retry {attempt})");
         }
         notify(&conn);
     })?;
     Ok(())
+}
+
+/// `PermissionDenied` while either device is, otherwise the keyboard's status.
+pub fn either_denied(keyboard: DeviceStatus, mouse: DeviceStatus) -> DeviceStatus {
+    if mouse == DeviceStatus::PermissionDenied { mouse } else { keyboard }
 }
 
 /// Call `connect` until it reports something other than permission denied,
@@ -202,6 +263,7 @@ pub fn spawn_resume(ctl: Shared, conn: zbus::blocking::Connection) -> zbus::Resu
                     eprintln!("resumed from suspend; re-applying");
                     thread::sleep(RESUME_SETTLE);
                     reapply_with_retries(&ctl, &conn);
+                    reapply_mouse_with_retries(&ctl, &conn);
                 }
                 Ok(true) => {}
                 Err(e) => eprintln!("bad PrepareForSleep signal: {e}"),
@@ -214,6 +276,28 @@ pub fn spawn_resume(ctl: Shared, conn: zbus::blocking::Connection) -> zbus::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_continues_while_either_device_is_denied() {
+        use DeviceStatus::*;
+        assert_eq!(either_denied(PermissionDenied, Disconnected), PermissionDenied);
+        assert_eq!(either_denied(Connected, PermissionDenied), PermissionDenied);
+        assert_eq!(either_denied(Connected, Connected), Connected);
+        assert_eq!(either_denied(Connected, Disconnected), Connected, "no mouse: done");
+        let mut replies = [(PermissionDenied, PermissionDenied), (Connected, PermissionDenied), (Connected, Connected)]
+            .into_iter()
+            .map(|(k, m)| either_denied(k, m));
+        assert_eq!(retry_while_denied(30, || replies.next().unwrap()), (3, Connected));
+    }
+
+    #[test]
+    fn remove_disconnects_only_the_matching_device() {
+        let (kb, mouse) = (Path::new("/dev/hidraw8"), Path::new("/dev/hidraw10"));
+        assert_eq!(removed_device("hidraw8", Some(kb), Some(mouse)), Some(Removed::Keyboard));
+        assert_eq!(removed_device("hidraw10", Some(kb), Some(mouse)), Some(Removed::Mouse));
+        assert_eq!(removed_device("hidraw9", Some(kb), Some(mouse)), None, "the mouse's boot node");
+        assert_eq!(removed_device("hidraw10", Some(kb), None), None);
+    }
 
     #[test]
     fn login_retry_stops_once_access_arrives() {

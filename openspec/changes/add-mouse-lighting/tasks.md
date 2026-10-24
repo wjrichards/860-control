@@ -11,16 +11,16 @@
 
 ## 2. Service: mouse lighting
 
-- [ ] 2.1 Add `MouseSide` and `MouseSettings` to `Controller`, `mouse_output()` with the D3 table, and `apply_mouse_logged()` after every keyboard-affecting path (D3). Verify with fake-device tests:
+- [x] 2.1 Add `MouseSide` and `MouseSettings` to `Controller`, `mouse_output()` with the D3 table, and `apply_mouse_logged()` after every keyboard-affecting path (D3). Verify with fake-device tests:
   - every mapping (Off, Static, Breathe, Cycle; Wave to Cycle, Ripple to Static, Custom and Gaming to W's colour, Off when W is off);
   - lights off, then on again;
   - a game starting and ending;
   - an own setting turns matching off and the lights on;
   - a mouse error leaves the keyboard call's result unchanged;
   - no mouse leaves the keyboard tests unchanged
-- [ ] 2.2 Save `[mouse]` in `state.toml` (D7). Verify with store tests: a change-3 file loads with matching on and no own setting; the own setting round-trips; `[mouse]` isn't written until something changes
-- [ ] 2.3 Hotplug, resume and the login retry cover the mouse (D6). Verify with unit tests of the retry loop over two devices, and of "remove" disconnecting only the matching device
-- [ ] 2.4 D-Bus members (D5), emitted with the others. Verify on a private bus with no devices visible (`bwrap --dev /dev`, as in change 3) that the properties read and `SetMouseLighting` and `SetMouseMatch` round-trip and save
+- [x] 2.2 Save `[mouse]` in `state.toml` (D7). Verify with store tests: a change-3 file loads with matching on and no own setting; the own setting round-trips; `[mouse]` isn't written until something changes
+- [x] 2.3 Hotplug, resume and the login retry cover the mouse (D6). Verify with unit tests of the retry loop over two devices, and of "remove" disconnecting only the matching device
+- [x] 2.4 D-Bus members (D5), emitted with the others. Verify on a private bus with no devices visible (`bwrap --dev /dev`, as in change 3) that the properties read and `SetMouseLighting` and `SetMouseMatch` round-trip and save
 - [ ] 2.5 Add the `046d:c08b` line to `packaging/70-g512-control.rules`, and the reinstall steps to the README. Verify that the user installs it with sudo, and that the mouse's hidraw nodes get the session ACL (`getfacl`)
 - [ ] 2.6 Install the service (with the user's OK for the restart) and check on the hardware, with the user watching:
   - matching Static, Breathe, Cycle, Ripple and Gaming (via `gamemode-simulate-game`);

@@ -1,0 +1,20 @@
+hidraw nodes visible: 0
+start: MouseState s "disconnected" MouseName s "" MouseEffects a(sbbyy) 0 
+       MouseMatch b true MouseLighting (s(yyy)yy) "Static" 255 255 255 50 100 
+keyboard set to Ripple: MouseLighting (default own) (s(yyy)yy) "Static" 61 56 70 52 100 
+SetMouseLighting Static blue: pending b true
+  MouseMatch b false MouseLighting (s(yyy)yy) "Static" 0 0 255 50 80 LightsOn b true 
+  signal carried MouseMatch=false: 1
+  saved [mouse]:
+    [mouse]
+    match_keyboard = false
+    effect = "Static"
+    color = "#0000ff"
+    speed = 50
+    brightness = 80
+SetMouseMatch true: MouseMatch b true saved match_keyboard = true
+SetMouseLighting Ripple (not a mouse effect):
+  Call failed: the mouse does not offer Ripple
+--- service log:
+g512d 0.1.0 serving io.github.g512control.Lighting1; keyboard disconnected, mouse disconnected
+warning: no resume events (D-Bus handshake failed: EXTERNAL rejected by the server. Accepted mechanisms: [EXTERNAL]); lighting will not be re-applied after suspend

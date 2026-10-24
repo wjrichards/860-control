@@ -8,7 +8,7 @@ use zbus::{fdo, interface, object_server::SignalEmitter};
 use crate::{
     controller::{Controller, HidrawOpener, SetError},
     keymap::{KeyMap, MapName},
-    state::{Effect, LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
+    state::{Effect, InvalidState, LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
 };
 
 pub const BUS_NAME: &str = "io.github.g512control.Lighting1";
@@ -27,6 +27,19 @@ const DEFAULT_STATE: LightingState = LightingState {
 /// A key map as sent on the bus: (key usage, r, g, b), sorted by key.
 fn map_entries(map: &KeyMap) -> Vec<(u8, u8, u8, u8)> {
     map.entries().map(|(k, c)| (k.usage(), c.r, c.g, c.b)).collect()
+}
+
+/// Effects as sent on the bus: (name, accepts colour, accepts speed, min
+/// speed, max speed).
+fn effect_list(effects: Vec<Effect>) -> Vec<(String, bool, bool, u8, u8)> {
+    effects
+        .into_iter()
+        .map(|e| {
+            let speed = e.has_speed();
+            let (min, max) = if speed { (SPEED_MIN, SPEED_MAX) } else { (0, 0) };
+            (e.name().to_string(), e.accepts_color(), speed, min, max)
+        })
+        .collect()
 }
 
 fn set_error(e: SetError) -> fdo::Error {
@@ -57,7 +70,12 @@ impl Lighting {
         self.gaming_keys_changed(emitter).await?;
         self.game_switch_changed(emitter).await?;
         self.game_active_changed(emitter).await?;
-        self.lights_on_changed(emitter).await
+        self.lights_on_changed(emitter).await?;
+        self.mouse_state_changed(emitter).await?;
+        self.mouse_name_changed(emitter).await?;
+        self.mouse_effects_changed(emitter).await?;
+        self.mouse_match_changed(emitter).await?;
+        self.mouse_lighting_changed(emitter).await
     }
 }
 
@@ -86,15 +104,7 @@ impl Lighting {
     /// Speed 100 is the fastest. Empty when not connected.
     #[zbus(property)]
     async fn effects(&self) -> Vec<(String, bool, bool, u8, u8)> {
-        self.ctl()
-            .offered()
-            .into_iter()
-            .map(|e| {
-                let speed = e.has_speed();
-                let (min, max) = if speed { (SPEED_MIN, SPEED_MAX) } else { (0, 0) };
-                (e.name().to_string(), e.accepts_color(), speed, min, max)
-            })
-            .collect()
+        effect_list(self.ctl().offered())
     }
 
     /// The saved lighting state: (effect, (r, g, b), speed, brightness).
@@ -187,6 +197,68 @@ impl Lighting {
         self.ctl().set_lights_on(on);
         self.emit_all(&emitter).await?;
         Ok(())
+    }
+
+    /// The G502 HERO: `connected`, `disconnected`, `permission-denied` or
+    /// `unsupported`.
+    #[zbus(property)]
+    async fn mouse_state(&self) -> String {
+        self.ctl().mouse_status().as_str().to_string()
+    }
+
+    /// Empty when the mouse is not connected.
+    #[zbus(property)]
+    async fn mouse_name(&self) -> String {
+        self.ctl().mouse_info().map(|i| i.name.clone()).unwrap_or_default()
+    }
+
+    /// The mouse's selectable effects, as `Effects`; empty when not connected.
+    #[zbus(property)]
+    async fn mouse_effects(&self) -> Vec<(String, bool, bool, u8, u8)> {
+        effect_list(self.ctl().mouse_offered())
+    }
+
+    /// True while the mouse follows the keyboard's lighting.
+    #[zbus(property)]
+    async fn mouse_match(&self) -> bool {
+        self.ctl().settings().mouse.match_keyboard
+    }
+
+    /// The mouse's own setting, shown while it isn't matching: (effect,
+    /// (r, g, b), speed, brightness).
+    #[zbus(property)]
+    async fn mouse_lighting(&self) -> (String, (u8, u8, u8), u8, u8) {
+        let s = self.ctl().mouse_own();
+        (s.effect.name().to_string(), (s.color.r, s.color.g, s.color.b), s.speed, s.brightness)
+    }
+
+    async fn set_mouse_match(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, on: bool) -> fdo::Result<()> {
+        self.ctl().set_mouse_match(on);
+        self.emit_all(&emitter).await?;
+        Ok(())
+    }
+
+    /// Give the mouse its own setting; turns matching off and the lights on.
+    /// Returns whether it is pending (the mouse is not connected).
+    async fn set_mouse_lighting(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        effect: String,
+        color: (u8, u8, u8),
+        speed: u8,
+        brightness: u8,
+    ) -> fdo::Result<bool> {
+        let effect = effect_from_name(&effect).map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+        let state = LightingState { effect, color: Rgb::new(color.0, color.1, color.2), speed, brightness };
+        let result = self.ctl().set_mouse_lighting(state);
+        let pending = result.map_err(|e| match e {
+            SetError::Invalid(InvalidState::EffectNotOffered(effect)) => {
+                fdo::Error::InvalidArgs(format!("the mouse does not offer {}", effect.name()))
+            }
+            e => set_error(e),
+        })?;
+        self.emit_all(&emitter).await?;
+        Ok(pending)
     }
 }
 
