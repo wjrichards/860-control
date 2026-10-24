@@ -43,4 +43,4 @@
 
 - [x] 4.1 README: DPI and profiles in the Mouse section, the backup file and the restore command, `busctl` examples, and Things to know (flash writes)
 - [x] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
-- [ ] 4.3 Hands-on pass with the user in the app: switch profile, change a DPI step and the report rate, and add and remove a step
+- [x] 4.3 Hands-on pass with the user in the app: switch profile, change a DPI step and the report rate, and add and remove a step

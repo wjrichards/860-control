@@ -36,7 +36,17 @@ The user worked through six steps on profile 4. Recorded calls (UTC; the user is
 - **Found here:** step 5 lowered Step 2 by 50 instead of removing it. The remove button used a minus icon right next to the spin row's own − button. It now uses a trash icon (`user-trash-symbolic`); see the commit "Use a trash icon for removing a DPI step". Removal is checked again below.
 - **Restore:** afterwards, `g512d --restore-mouse-profiles` wrote back only sector 4. The service re-read the profiles, and the mouse is back to 3200 DPI on profile 4.
 
-**Removing a step with the trash button: not yet checked by hand.** The app was rebuilt with the trash icon and relaunched (08:23:59). Two recordings (08:24–08:34, and the one before) caught no calls; the user then chose to open the PR. The removal logic is covered by the `profile_edit` unit tests. Task 4.3 stays open for this one check.
+**Removing a step with the trash button** was checked after PR #9 merged, with the app rebuilt with the trash icon. Two earlier recordings caught nothing; a third, on 2026-10-24, recorded (UTC):
+
+```
+13:26:27  SetMouseProfile 4, 1 ms, default 0, [3200 6400]   Add Step
+13:26:41  SetMouseProfile 4, 1 ms, default 0, [3200]        trash on Step 2
+13:26:43  SetMouseProfile 4, 1 ms, default 0, [3200 6400]   Add Step
+13:26:46  SetMouseProfile 4, 1 ms, default 0, [3200]        trash on Step 2
+```
+
+- Each removal wrote a single-step profile.
+- `g512d --restore-mouse-profiles` then reported every user sector "Unchanged": profile 4 is byte-for-byte the user's original again.
 
 ## 4.2 Workspace checks
 
