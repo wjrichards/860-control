@@ -7,7 +7,7 @@
 ## 1. Protocol
 
 - [x] 1.1 Add AdjustableDpi and OnboardProfiles to `Feature`, with `Feature::allows(function)` enforced in `Device::request` (D1). PerKeyLighting is limited to fn3 and fn5. Verify with tests that every function outside the lists returns `FunctionNotAllowed` with nothing sent, and that the allowlist test matches the spec
-- [ ] 1.2 Add `profiles` (D2): `read_info`, `UserSector`, `ProfileSector` (parse with CRC check, `edited`), `read_sector`, `write_sector` with read-back, `current_profile`/`set_current_profile`, `dpi_range`. Give the fake mouse profile memory built from the spike 6 backup. Verify with tests:
+- [x] 1.2 Add `profiles` (D2): `read_info`, `UserSector`, `ProfileSector` (parse with CRC check, `edited`), `read_sector`, `write_sector` with read-back, `current_profile`/`set_current_profile`, `dpi_range`. Give the fake mouse profile memory built from the spike 6 backup. Verify with tests:
   - parsing all five real sectors;
   - `edited` changing only bytes 0, 1, 2 (when needed), 3–12 and 254–255;
   - the CRC against the real sectors;

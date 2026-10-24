@@ -21,6 +21,12 @@ pub enum Error {
     InvalidKey(u8),
     /// The device replied with data this crate cannot interpret.
     Protocol(String),
+    /// An onboard profile layout other than format 2.
+    UnsupportedProfileFormat(u8),
+    /// A profile, sector or profile edit that this crate refuses.
+    InvalidProfile(String),
+    /// A written profile sector read back differently.
+    WriteNotVerified { sector: u16 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -45,6 +51,9 @@ impl fmt::Display for Error {
             }
             Error::InvalidKey(usage) => write!(f, "key {usage:#04x} is not in the ANSI 104-key set"),
             Error::Protocol(msg) => write!(f, "unexpected reply: {msg}"),
+            Error::UnsupportedProfileFormat(n) => write!(f, "onboard profile format {n} is not supported"),
+            Error::InvalidProfile(msg) => write!(f, "invalid profile: {msg}"),
+            Error::WriteNotVerified { sector } => write!(f, "profile sector {sector} read back differently"),
         }
     }
 }
