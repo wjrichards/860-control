@@ -3,6 +3,7 @@
 
 mod editor;
 mod layout;
+mod mouse_section;
 mod service;
 mod throttle;
 mod window;
