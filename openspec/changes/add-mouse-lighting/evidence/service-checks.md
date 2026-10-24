@@ -67,3 +67,47 @@
   - `state.toml` gains a `[mouse]` table with `match_keyboard = false` and Static `#0000ff`, speed 50, brightness 80.
 - **`SetMouseMatch true`:** `MouseMatch` is true, and `match_keyboard = true` is saved.
 - **`SetMouseLighting` Ripple:** refused with "the mouse does not offer Ripple". The first run said "the keyboard", because the error type was written for the keyboard; the mouse call now has its own message.
+
+## 2.5 udev rule
+
+- **Install:** the user reinstalled the rule with sudo. The `sudo` log shows `install`, `udevadm control --reload` and `udevadm trigger` at 22:31:57–58.
+- **Result:** `/etc/udev/rules.d/70-g512-control.rules` has the `c08b` line. `getfacl` shows `user:wrichards:rw-` on both mouse nodes (`hidraw9`, `hidraw10`).
+- **A bug found here:**
+  - `udevadm trigger` sends "change" events, not "add", and the service ignored them. The mouse therefore stayed `permission-denied` after its 15 s login retry had already given up at 22:30:57.
+  - Fixed in `953c219`: "change" on a hidraw node now reconnects any missing device, like "add".
+  - After reinstalling, the service started with "keyboard connected, mouse connected" (22:32:46).
+
+## 2.6 On the hardware
+
+`mouse_hardware_check.sh` (`mouse_hardware_check.out`), with the user watching. Every call succeeded, and the service logged no mouse errors.
+
+| Step | Keyboard | Mouse (expected) |
+|---|---|---|
+| 1 | Static red | red |
+| 2 | Breathe green | breathes green |
+| 3 | Cycle, speed 10 | slow cycle at the keyboard's pace |
+| 4 | Cycle, speed 100 | fast cycle at the keyboard's pace |
+| 5 | Wave | cycles |
+| 6 | Ripple cyan | static cyan |
+| 7 | `gamemode-simulate-game` | orange-red during the game (`GameActive` true), cyan after |
+| 8 | lights off, then on | dark, then cyan |
+| 9 | stays cyan Ripple | own Breathe blue (`MouseMatch` false) |
+| 10 | user's Ripple restored | matching again |
+
+**The user confirmed "All as described".** This includes the Cycle pace matching the keyboard, which settles design D4: the keyboard's speed ranges work for the mouse.
+
+They also noted the mouse "now is green". Matching the restored Ripple shows Static `#3d3846`, a very dim grey-purple. That reads as green on the mouse, probably because its green LED is the most efficient at low levels. That's an explanation, not a measurement. No change was made: the user can choose an own colour, or a brighter Ripple colour.
+
+**DPI buttons:** the user reports they still work. They never reach the computer in onboard mode, so this can't be seen from the service.
+
+**Replug:** the first reported replug left no trace (no log lines, device nodes unchanged). The second one, at 22:39:44, took out the keyboard and the mouse together, probably through a shared hub:
+
+```
+22:39:44.494  disconnected
+22:39:44.592  mouse disconnected
+22:39:48.266  re-applied lighting (attempt 1)
+22:39:48.358  mouse connected: G502 HERO Gaming Mouse on /dev/hidraw3
+22:39:48.366  re-applied mouse lighting (attempt 1)
+```
+
+Both devices came back within 4 s on new nodes, each re-applied on the first attempt.
