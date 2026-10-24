@@ -1,0 +1,241 @@
+//! The Mouse Profile group: which onboard profile is active, and its report
+//! rate and DPI steps. Edits are written to the mouse once the user has
+//! stopped changing them for [`SAVE_DELAY`], as one request.
+
+use std::{
+    cell::{Cell, RefCell},
+    rc::{Rc, Weak},
+    time::Duration,
+};
+
+use adw::prelude::*;
+use gtk::glib;
+
+use crate::{
+    profile_edit::{DpiRange, MAX_STEPS, ProfileEdit, REPORT_RATES},
+    service::Mouse,
+};
+
+/// Flash wears with writes: wait for a pause before writing.
+const SAVE_DELAY: Duration = Duration::from_secs(2);
+
+type Handler<T> = RefCell<Option<Box<dyn Fn(T)>>>;
+
+pub struct ProfileSection {
+    pub group: adw::PreferencesGroup,
+    profile_row: adw::ComboRow,
+    profile_names: gtk::StringList,
+    rate_row: adw::ComboRow,
+    add_row: adw::ButtonRow,
+    /// One per DPI step; their check and remove buttons live inside them.
+    steps: RefCell<Vec<adw::SpinRow>>,
+    edit: RefCell<Option<ProfileEdit>>,
+    active: Cell<u8>,
+    range: Cell<DpiRange>,
+    pending: RefCell<Option<glib::SourceId>>,
+    syncing: Cell<bool>,
+    on_switch: Handler<u8>,
+    on_save: Handler<(u8, ProfileEdit)>,
+}
+
+impl ProfileSection {
+    pub fn new() -> Rc<Self> {
+        let profile_names = gtk::StringList::new(&[]);
+        let profile_row = adw::ComboRow::builder().title("Profile").model(&profile_names).build();
+        let rate_names: Vec<&str> = REPORT_RATES.iter().map(|&(_, label)| label).collect();
+        let rate_row =
+            adw::ComboRow::builder().title("Report Rate").model(&gtk::StringList::new(&rate_names)).build();
+        let add_row = adw::ButtonRow::builder().title("Add Step").start_icon_name("list-add-symbolic").build();
+        let group = adw::PreferencesGroup::builder()
+            .title("Mouse Profile")
+            .description("Stored on the mouse: its DPI buttons cycle through these steps")
+            .visible(false)
+            .build();
+        group.add(&profile_row);
+        group.add(&rate_row);
+        group.add(&add_row);
+
+        let section = Rc::new(ProfileSection {
+            group,
+            profile_row,
+            profile_names,
+            rate_row,
+            add_row,
+            steps: RefCell::new(Vec::new()),
+            edit: RefCell::new(None),
+            active: Cell::new(0),
+            range: Cell::new(DpiRange { min: 100, max: 25600, step: 50 }),
+            pending: RefCell::new(None),
+            syncing: Cell::new(false),
+            on_switch: RefCell::new(None),
+            on_save: RefCell::new(None),
+        });
+        section.connect_controls();
+        section
+    }
+
+    /// `on_switch` makes a profile active; `on_save` writes a profile.
+    pub fn connect(&self, on_switch: impl Fn(u8) + 'static, on_save: impl Fn((u8, ProfileEdit)) + 'static) {
+        *self.on_switch.borrow_mut() = Some(Box::new(on_switch));
+        *self.on_save.borrow_mut() = Some(Box::new(on_save));
+    }
+
+    fn connect_controls(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.profile_row.connect_selected_notify(move |row| {
+            let Some(s) = weak.upgrade().filter(|s| !s.syncing.get()) else { return };
+            s.save_now();
+            let number = u8::try_from(row.selected() + 1).unwrap_or(1);
+            if let Some(f) = s.on_switch.borrow().as_ref() {
+                f(number);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.rate_row.connect_selected_notify(move |row| {
+            let Some(s) = weak.upgrade().filter(|s| !s.syncing.get()) else { return };
+            let ms = REPORT_RATES.get(row.selected() as usize).map_or(1, |&(ms, _)| ms);
+            s.change(|e, _| e.report_rate_ms = ms);
+        });
+        let weak = Rc::downgrade(self);
+        self.add_row.connect_activated(move |_| {
+            if let Some(s) = weak.upgrade() {
+                s.change(|e, range| {
+                    e.add_step(range);
+                });
+                s.rebuild_steps();
+            }
+        });
+    }
+
+    /// The service's view of the mouse. Hidden without profiles; left alone
+    /// while an edit is waiting to be written.
+    pub fn show(self: &Rc<Self>, mouse: Option<&Mouse>) {
+        let profiles = mouse.filter(|m| m.state == "connected").map_or(&[][..], |m| m.profiles.as_slice());
+        self.group.set_visible(!profiles.is_empty());
+        let Some(m) = mouse.filter(|_| !profiles.is_empty()) else { return };
+        if self.pending.borrow().is_some() {
+            return;
+        }
+        let Some(profile) = profiles.iter().find(|p| p.number == m.active_profile) else { return };
+        let (min, max, step) = m.dpi_range;
+        if step > 0 {
+            self.range.set(DpiRange { min, max, step });
+        }
+        let edit = ProfileEdit {
+            report_rate_ms: profile.report_rate_ms,
+            default_index: profile.default_index,
+            dpis: profile.dpis.clone(),
+        };
+        let unchanged = self.active.get() == m.active_profile && self.edit.borrow().as_ref() == Some(&edit);
+        self.syncing.set(true);
+        if self.profile_names.n_items() as usize != profiles.len() {
+            let names: Vec<String> = profiles.iter().map(|p| format!("Profile {}", p.number)).collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            self.profile_names.splice(0, self.profile_names.n_items(), &names);
+        }
+        self.profile_row.set_selected(u32::from(m.active_profile.saturating_sub(1)));
+        self.rate_row.set_selected(edit.rate_position() as u32);
+        self.active.set(m.active_profile);
+        *self.edit.borrow_mut() = Some(edit);
+        self.syncing.set(false);
+        if !unchanged {
+            self.rebuild_steps();
+        }
+    }
+
+    /// One row per DPI step, rebuilt from the edit; "Add Step" stays last.
+    fn rebuild_steps(self: &Rc<Self>) {
+        for row in self.steps.borrow_mut().drain(..) {
+            self.group.remove(&row);
+        }
+        self.group.remove(&self.add_row);
+        let Some(edit) = self.edit.borrow().clone() else { return };
+        let range = self.range.get();
+        self.syncing.set(true);
+        let mut first: Option<gtk::CheckButton> = None;
+        let mut rows = Vec::new();
+        for (i, &dpi) in edit.dpis.iter().enumerate() {
+            let row = adw::SpinRow::with_range(f64::from(range.min), f64::from(range.max), f64::from(range.step));
+            row.set_title(&format!("Step {}", i + 1));
+            row.set_value(f64::from(dpi));
+            let default = gtk::CheckButton::builder().active(i == usize::from(edit.default_index)).build();
+            default.set_group(first.as_ref());
+            default.set_tooltip_text(Some("Default step"));
+            default.update_property(&[gtk::accessible::Property::Label(&format!("Step {} is the default", i + 1))]);
+            first.get_or_insert_with(|| default.clone());
+            let remove = gtk::Button::builder()
+                .icon_name("list-remove-symbolic")
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .sensitive(edit.dpis.len() > 1)
+                .build();
+            remove.update_property(&[gtk::accessible::Property::Label(&format!("Remove step {}", i + 1))]);
+            row.add_prefix(&default);
+            row.add_suffix(&remove);
+            self.group.add(&row);
+            self.connect_step(i, &row, &default, &remove);
+            rows.push(row);
+        }
+        self.group.add(&self.add_row);
+        self.add_row.set_sensitive(edit.dpis.len() < MAX_STEPS);
+        *self.steps.borrow_mut() = rows;
+        self.syncing.set(false);
+    }
+
+    fn connect_step(self: &Rc<Self>, i: usize, row: &adw::SpinRow, default: &gtk::CheckButton, remove: &gtk::Button) {
+        let weak: Weak<Self> = Rc::downgrade(self);
+        row.connect_value_notify(move |row| {
+            let Some(s) = weak.upgrade().filter(|s| !s.syncing.get()) else { return };
+            let value = row.value().round() as u16;
+            s.change(|e, range| e.set_dpi(i, value, range));
+        });
+        let weak = Rc::downgrade(self);
+        default.connect_toggled(move |b| {
+            let Some(s) = weak.upgrade().filter(|s| !s.syncing.get() && b.is_active()) else { return };
+            s.change(|e, _| e.set_default(i));
+        });
+        let weak = Rc::downgrade(self);
+        remove.connect_clicked(move |_| {
+            let Some(s) = weak.upgrade() else { return };
+            s.change(|e, _| {
+                e.remove_step(i);
+            });
+            // Rebuild after this handler returns: it belongs to a row being removed.
+            glib::idle_add_local_once(move || s.rebuild_steps());
+        });
+    }
+
+    /// Apply a change to the edit and restart the save timer.
+    fn change(self: &Rc<Self>, f: impl FnOnce(&mut ProfileEdit, DpiRange)) {
+        let range = self.range.get();
+        if let Some(edit) = self.edit.borrow_mut().as_mut() {
+            f(edit, range);
+        }
+        if let Some(id) = self.pending.borrow_mut().take() {
+            id.remove();
+        }
+        let weak = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(SAVE_DELAY, move || {
+            if let Some(s) = weak.upgrade() {
+                s.pending.borrow_mut().take();
+                s.send();
+            }
+        });
+        *self.pending.borrow_mut() = Some(id);
+    }
+
+    /// Write a waiting edit at once (before switching profiles).
+    fn save_now(&self) {
+        if let Some(id) = self.pending.borrow_mut().take() {
+            id.remove();
+            self.send();
+        }
+    }
+
+    fn send(&self) {
+        let Some(edit) = self.edit.borrow().clone() else { return };
+        if let Some(f) = self.on_save.borrow().as_ref() {
+            f((self.active.get(), edit));
+        }
+    }
+}

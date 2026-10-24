@@ -4,6 +4,8 @@
 mod editor;
 mod layout;
 mod mouse_section;
+mod profile_edit;
+mod profile_section;
 mod service;
 mod throttle;
 mod window;
