@@ -1,0 +1,12 @@
+hidraw nodes visible: 0
+MouseProfiles: a(yyyaq) 0 
+MouseActiveProfile: y 0 
+MouseDpiRange: (qqq) 0 0 0 
+SetMouseProfile 4, 1 ms, default 0, [1600 3200]:
+  Call failed: the mouse is not connected
+SetMouseActiveProfile 1:
+  Call failed: the mouse is not connected
+backup file written: none
+g512d --restore-mouse-profiles with no mouse:
+  no G502 HERO found
+  exit status 1

@@ -12,11 +12,13 @@ use g512_hidpp::{
     effects::{self, EffectKind, EffectParams, Zone},
     info::{self, DeviceInfo},
     perkey::{self, Frame},
+    profiles::{self, DpiRange, ProfileSector, ProfilesInfo},
 };
 
 use crate::{
     keymap::{Corrections, KeyMap, MapName, compose, map_frame},
     mouse::{self, KeyboardView, MOUSE_EFFECTS, MouseSettings},
+    profile_backup,
     state::{BRIGHTNESS_MAX, Effect, InvalidState, LightingState},
     store::{Saved, Settings, Store},
 };
@@ -77,6 +79,10 @@ impl Opener for HidrawOpener {
 pub enum SetError {
     Invalid(InvalidState),
     Device(HidppError),
+    /// A mouse profile request the service refuses (bad values, no profiles).
+    Profile(String),
+    /// The profile backup could not be saved, so nothing was written.
+    Backup(io::Error),
 }
 
 struct Connection<T> {
@@ -92,6 +98,41 @@ struct MouseConnection<T> {
     path: PathBuf,
     zones: Vec<Zone>,
     info: DeviceInfo,
+    /// `None` when the profiles couldn't be read; lighting still works.
+    profiles: Option<MouseProfiles>,
+}
+
+/// The mouse's onboard profiles as last read or written.
+pub struct MouseProfiles {
+    info: ProfilesInfo,
+    /// Profile 1 first.
+    sectors: Vec<ProfileSector>,
+    /// 1-based.
+    pub active: u8,
+    pub dpi_range: DpiRange,
+}
+
+/// One profile as front ends see it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfileView {
+    pub number: u8,
+    pub report_rate_ms: u8,
+    pub default_index: u8,
+    pub dpis: Vec<u16>,
+}
+
+impl MouseProfiles {
+    pub fn views(&self) -> Vec<ProfileView> {
+        (1..)
+            .zip(&self.sectors)
+            .map(|(number, s)| ProfileView {
+                number,
+                report_rate_ms: s.report_rate_ms(),
+                default_index: s.default_index(),
+                dpis: s.dpis(),
+            })
+            .collect()
+    }
 }
 
 /// What is sent to the keyboard: a zone effect, or a per-key frame.
@@ -432,6 +473,76 @@ impl<O: Opener> Controller<O> {
         true
     }
 
+    /// The mouse's profiles; `None` when not connected or not readable.
+    pub fn mouse_profiles(&self) -> Option<&MouseProfiles> {
+        self.mouse.as_ref().and_then(|m| m.profiles.as_ref())
+    }
+
+    /// Make profile `number` (1-based) the mouse's active one, then re-apply
+    /// the mouse lighting (a profile switch may bring back its stored lighting).
+    pub fn set_mouse_active_profile(&mut self, number: u8) -> Result<(), SetError> {
+        let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
+        let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
+        if number == 0 || number > p.info.profile_count {
+            return Err(SetError::Profile(format!("no profile {number}")));
+        }
+        let result = profiles::set_current_profile(&mut m.device, &p.info, number)
+            .and_then(|()| profiles::current_profile(&mut m.device));
+        match result {
+            Ok(active) => p.active = active,
+            Err(e) => return Err(self.mouse_device_error(e)),
+        }
+        self.apply_mouse_logged();
+        Ok(())
+    }
+
+    /// Change profile `number`'s report rate, DPI steps and default step on
+    /// the mouse. Saves the backup first (once ever); a failed write keeps
+    /// the previous values.
+    pub fn set_mouse_profile(
+        &mut self,
+        number: u8,
+        report_rate_ms: u8,
+        default_index: u8,
+        dpis: &[u16],
+    ) -> Result<(), SetError> {
+        let backup = self.store.path().with_file_name("mouse-profiles-backup.txt");
+        let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
+        let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
+        let sector = p.info.user_sector(number).map_err(|e| SetError::Profile(e.to_string()))?;
+        if let Some(bad) = dpis.iter().find(|&&d| !p.dpi_range.contains(d)) {
+            let r = p.dpi_range;
+            return Err(SetError::Profile(format!("{bad} DPI is not {} to {} in steps of {}", r.min, r.max, r.step)));
+        }
+        let index = usize::from(number - 1);
+        let edited = p.sectors[index]
+            .edited(report_rate_ms, default_index, dpis)
+            .map_err(|e| SetError::Profile(e.to_string()))?;
+        match profile_backup::save_once(&mut m.device, &p.info, &backup) {
+            Ok(true) => eprintln!("saved the mouse's profiles to {}", backup.display()),
+            Ok(false) => {}
+            Err(e) => return Err(SetError::Backup(e)),
+        }
+        if let Err(e) = profiles::write_sector(&mut m.device, &p.info, sector, &edited) {
+            return Err(self.mouse_device_error(e));
+        }
+        p.sectors[index] = edited;
+        let active = p.active == number;
+        eprintln!("mouse profile {number}: {report_rate_ms} ms, DPI {dpis:?}, default step {}", default_index + 1);
+        if active {
+            self.apply_mouse_logged();
+        }
+        Ok(())
+    }
+
+    /// A failed profile request: a lost link disconnects the mouse.
+    fn mouse_device_error(&mut self, e: HidppError) -> SetError {
+        if is_link_error(&e) {
+            self.disconnect_mouse();
+        }
+        SetError::Device(e)
+    }
+
     /// Give the mouse its own setting: saved, matching off, lights on.
     /// Returns whether it is pending (the mouse is not connected).
     pub fn set_mouse_lighting(&mut self, state: LightingState) -> Result<bool, SetError> {
@@ -499,7 +610,24 @@ impl<O: Opener> Controller<O> {
         if zones.is_empty() {
             return Err(HidppError::FeatureMissing(Feature::ColorLedEffects));
         }
-        Ok(MouseConnection { device, path, zones, info })
+        let profiles = match Self::read_profiles(&mut device) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("mouse profiles not available: {e}");
+                None
+            }
+        };
+        Ok(MouseConnection { device, path, zones, info, profiles })
+    }
+
+    fn read_profiles(device: &mut Device<O::Transport>) -> Result<MouseProfiles, HidppError> {
+        let info = profiles::read_info(device)?;
+        let sectors = (1..=info.profile_count)
+            .map(|n| profiles::read_sector(device, &info, info.user_sector(n)?))
+            .collect::<Result<Vec<_>, _>>()?;
+        let active = profiles::current_profile(device)?;
+        let dpi_range = profiles::dpi_range(device)?;
+        Ok(MouseProfiles { info, sectors, active, dpi_range })
     }
 
     /// What the mouse should show, from the keyboard's settings and its own.
@@ -676,8 +804,11 @@ mod tests {
         fn open(&mut self, model: Model) -> Opened<SharedFake> {
             if model == Model::G502Hero {
                 return match self.mouse_outcomes.pop_front().unwrap_or("absent") {
-                    "g502" => {
-                        let fake = Rc::new(RefCell::new(FakeKeyboard::g502_hero()));
+                    kind @ ("g502" | "g502-format3" | "g502-corrupt") => {
+                        let mut mouse = FakeKeyboard::g502_hero();
+                        mouse.profile_format = if kind == "g502-format3" { 3 } else { 2 };
+                        mouse.corrupt_next_write = kind == "g502-corrupt";
+                        let fake = Rc::new(RefCell::new(mouse));
                         *self.mouse_last.borrow_mut() = Some(fake.clone());
                         Opened::Device { transport: SharedFake(fake), path: "/dev/hidraw10".into() }
                     }
@@ -1226,5 +1357,122 @@ mod tests {
         let names: Vec<_> = c.mouse_offered().into_iter().map(Effect::name).collect();
         assert_eq!(names, ["Off", "Static", "Breathe", "Cycle"]);
         assert_eq!(c.mouse_info().unwrap().name, "G502 HERO Gaming Mouse");
+    }
+
+    fn backup_path(c: &Controller<FakeOpener>) -> PathBuf {
+        c.store.path().with_file_name("mouse-profiles-backup.txt")
+    }
+
+    fn views(c: &Controller<FakeOpener>) -> Vec<(u8, u8, u8, Vec<u16>)> {
+        let views = c.mouse_profiles().unwrap().views();
+        views.into_iter().map(|v| (v.number, v.report_rate_ms, v.default_index, v.dpis)).collect()
+    }
+
+    #[test]
+    fn mouse_profiles_are_read_on_connect() {
+        let (mut c, _, _) = with_mouse("profiles-read", &[], &["g502"]);
+        c.connect_mouse();
+        let p = c.mouse_profiles().unwrap();
+        assert_eq!((p.active, p.dpi_range.min, p.dpi_range.max, p.dpi_range.step), (4, 100, 25600, 50));
+        assert_eq!(views(&c)[0], (1, 1, 1, vec![1200, 2400, 3200, 6400]));
+        assert_eq!(views(&c)[3], (4, 1, 0, vec![3200]));
+    }
+
+    #[test]
+    fn mouse_profile_edit_writes_after_a_backup() {
+        let (mut c, _, m) = with_mouse("profiles-edit", &[], &["g502"]);
+        c.connect_mouse();
+        assert!(!backup_path(&c).exists());
+        c.set_mouse_profile(5, 2, 1, &[800, 1600, 3200]).unwrap();
+        let backup = fs::read_to_string(backup_path(&c)).unwrap();
+        assert!(backup.contains("sector 0x0005: crc ok"), "the backup holds the profiles from before the write");
+        assert_eq!(views(&c)[4], (5, 2, 1, vec![800, 1600, 3200]));
+        let fake = m.borrow().as_ref().unwrap().clone();
+        assert_eq!(fake.borrow().profile_writes, [5]);
+        // A second edit leaves the backup as it was.
+        c.set_mouse_profile(5, 1, 0, &[6400]).unwrap();
+        assert_eq!(fs::read_to_string(backup_path(&c)).unwrap(), backup);
+        assert_eq!(fake.borrow().profile_writes, [5, 5]);
+    }
+
+    #[test]
+    fn mouse_profile_edits_are_validated() {
+        let (mut c, _, m) = with_mouse("profiles-invalid", &[], &["g502"]);
+        c.connect_mouse();
+        for (number, rate, default, dpis) in [
+            (6, 1, 0, vec![800]),
+            (0, 1, 0, vec![800]),
+            (1, 3, 0, vec![800]),
+            (1, 1, 0, vec![]),
+            (1, 1, 0, vec![100, 200, 300, 400, 500, 600]),
+            (1, 1, 2, vec![800, 1600]),
+            (1, 1, 0, vec![125]),
+            (1, 1, 0, vec![25650]),
+            (1, 1, 0, vec![50]),
+        ] {
+            let result = c.set_mouse_profile(number, rate, default, &dpis);
+            assert!(matches!(result, Err(SetError::Profile(_))), "{number} {rate} {default} {dpis:?}");
+        }
+        assert!(m.borrow().as_ref().unwrap().borrow().profile_writes.is_empty());
+        assert!(!backup_path(&c).exists(), "nothing written, not even the backup");
+    }
+
+    #[test]
+    fn failed_profile_write_keeps_the_old_values() {
+        let (mut c, _, _) = with_mouse("profiles-corrupt", &[], &["g502-corrupt"]);
+        c.connect_mouse();
+        let before = views(&c);
+        let result = c.set_mouse_profile(2, 1, 0, &[800]);
+        assert!(matches!(result, Err(SetError::Device(HidppError::WriteNotVerified { sector: 2 }))));
+        assert_eq!(views(&c), before);
+        assert_eq!(c.mouse_status(), DeviceStatus::Connected, "a failed check isn't a lost link");
+    }
+
+    #[test]
+    fn switching_profiles_reapplies_the_lighting() {
+        let (mut c, _, m) = with_mouse("profiles-switch", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        let writes = applied(&m).len();
+        c.set_mouse_active_profile(1).unwrap();
+        assert_eq!(c.mouse_profiles().unwrap().active, 1);
+        assert_eq!(applied(&m).len(), writes + 2, "both zones re-applied");
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
+        assert!(matches!(c.set_mouse_active_profile(6), Err(SetError::Profile(_))));
+        assert_eq!(c.mouse_profiles().unwrap().active, 1);
+    }
+
+    #[test]
+    fn editing_the_active_profile_reapplies_the_lighting() {
+        let (mut c, _, m) = with_mouse("profiles-active", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        let writes = applied(&m).len();
+        c.set_mouse_profile(5, 1, 0, &[6400]).unwrap();
+        assert_eq!(applied(&m).len(), writes, "an inactive profile: lighting left alone");
+        c.set_mouse_profile(4, 1, 0, &[1600, 3200]).unwrap();
+        assert_eq!(applied(&m).len(), writes + 2, "the active profile: lighting re-applied");
+    }
+
+    #[test]
+    fn mouse_without_readable_profiles_still_does_lighting() {
+        let (mut c, _, m) = with_mouse("profiles-none", &["g512"], &["g502-format3"]);
+        c.connect();
+        assert!(c.connect_mouse());
+        assert!(c.mouse_profiles().is_none());
+        c.set_state(red()).unwrap();
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
+        assert!(matches!(c.set_mouse_profile(1, 1, 0, &[800]), Err(SetError::Profile(_))));
+        assert!(matches!(c.set_mouse_active_profile(1), Err(SetError::Profile(_))));
+    }
+
+    #[test]
+    fn profile_requests_without_a_mouse() {
+        let (mut c, _, _) = with_mouse("profiles-nomouse", &["g512"], &[]);
+        c.connect();
+        assert!(c.mouse_profiles().is_none());
+        assert!(matches!(c.set_mouse_profile(1, 1, 0, &[800]), Err(SetError::Profile(_))));
     }
 }

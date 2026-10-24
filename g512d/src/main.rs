@@ -7,6 +7,7 @@ mod events;
 mod gamemode;
 mod keymap;
 mod mouse;
+mod profile_backup;
 mod state;
 mod store;
 
@@ -16,7 +17,8 @@ use std::{
     thread,
 };
 
-use controller::{Controller, HidrawOpener};
+use controller::{Controller, HidrawOpener, Opened, Opener};
+use g512_hidpp::{Device, discovery::Model};
 use dbus::{BUS_NAME, Lighting, OBJECT_PATH};
 use store::Store;
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
@@ -30,8 +32,9 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         ["--state", path] => Some(std::path::PathBuf::from(path)),
+        ["--restore-mouse-profiles", file] => return restore_mouse_profiles(file),
         _ => {
-            eprintln!("usage: g512d [--state <file>] | --version");
+            eprintln!("usage: g512d [--state <file>] | --restore-mouse-profiles <backup> | --version");
             return ExitCode::FAILURE;
         }
     };
@@ -102,6 +105,54 @@ fn main() -> ExitCode {
 }
 
 /// The unique bus name currently owning ours, for the "already running" message.
+/// Write the user profile sectors from a backup file back to the mouse.
+/// Runs alongside the service; both can talk to the mouse.
+fn restore_mouse_profiles(file: &str) -> ExitCode {
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("cannot read {file}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let sectors = profile_backup::parse(&text);
+    if sectors.is_empty() {
+        eprintln!("{file} has no profile sectors");
+        return ExitCode::FAILURE;
+    }
+    let transport = match HidrawOpener.open(Model::G502Hero) {
+        Opened::Device { transport, path } => {
+            println!("mouse on {}", path.display());
+            transport
+        }
+        Opened::NotFound => {
+            eprintln!("no G502 HERO found");
+            return ExitCode::FAILURE;
+        }
+        Opened::PermissionDenied => {
+            eprintln!("no permission to open the mouse; install the udev rule (packaging/INSTALL-udev.md)");
+            return ExitCode::FAILURE;
+        }
+        Opened::Failed(e) => {
+            eprintln!("cannot open the mouse: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = Device::open(transport).and_then(|mut dev| profile_backup::restore(&mut dev, &sectors));
+    match result {
+        Ok(done) => {
+            for (sector, outcome) in done {
+                println!("sector {sector:#06x}: {outcome:?}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("restore stopped: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn running_owner() -> String {
     let owner = zbus::blocking::Connection::session().and_then(|c| {
         let dbus = zbus::blocking::fdo::DBusProxy::new(&c)?;

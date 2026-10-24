@@ -18,14 +18,14 @@
 
 ## 2. Service
 
-- [ ] 2.1 Hold the profiles in the mouse connection (D4), and add `set_mouse_active_profile` and `set_mouse_profile` with the D5 validation, a once-only backup (D3) and a lighting re-apply. Verify with fake-mouse tests:
+- [x] 2.1 Hold the profiles in the mouse connection (D4), and add `set_mouse_active_profile` and `set_mouse_profile` with the D5 validation, a once-only backup (D3) and a lighting re-apply. Verify with fake-mouse tests:
   - each validation error;
   - the backup is written once and never overwritten;
   - a failed write keeps the cached values;
   - a switch re-applies the lighting;
   - a mouse without readable profiles still does lighting
-- [ ] 2.2 `g512d --restore-mouse-profiles FILE` (D3). Verify on the fake that it writes only CRC-valid user sectors from the file and checks each read-back
-- [ ] 2.3 D-Bus members (D6). Verify on a private bus with no devices that they read as empty or zero and that invalid edits are refused
+- [x] 2.2 `g512d --restore-mouse-profiles FILE` (D3). Verify on the fake that it writes only CRC-valid user sectors from the file and checks each read-back
+- [x] 2.3 D-Bus members (D6). Verify on a private bus with no devices that they read as empty or zero and that invalid edits are refused
 - [ ] 2.4 Install the service (with the user's OK for the restart) and check on the mouse with the user:
   - the backup file appears and matches the spike 6 backup;
   - editing an inactive profile, then the active one: the DPI buttons cycle the new steps, and the default holds after a replug;
