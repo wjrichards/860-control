@@ -35,12 +35,12 @@
 
 ## 3. App
 
-- [ ] 3.1 Add the Profile, Report Rate and DPI step rows to the Mouse section, with the 2 s debounce (D7). Verify:
+- [x] 3.1 Add the Profile, Report Rate and DPI step rows to the Mouse section, with the 2 s debounce (D7). Verify:
   - by AT-SPI, that the rows show the active profile, a spin change sends one `SetMouseProfile` about 2 s after the last change, and choosing a profile sends `SetMouseActiveProfile` (the combo rows need a person; see change 4);
   - unit tests for the debounce and edit model
 
 ## 4. Docs and checks
 
 - [x] 4.1 README: DPI and profiles in the Mouse section, the backup file and the restore command, `busctl` examples, and Things to know (flash writes)
-- [ ] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
+- [x] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
 - [ ] 4.3 Hands-on pass with the user in the app: switch profile, change a DPI step and the report rate, and add and remove a step
