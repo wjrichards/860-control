@@ -1,0 +1,14 @@
+profile 5 buttons before: 80010001 80010002 80010004 80010008 80010010 9007ffff 9004ffff 9003ffff 900affff 9002ffff 9001ffff
+profile 5 buttons after:  80010001 80010002 80020006 80020007 80020008 80020009 8002000a 8002000b 8002000c 8002000d 8002000e
+bytes changed: [41, 43, 45, 47, 49, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 70, 71, 72, 73, 74, 75, 254, 255]
+written and read back
+active profile now 5 (was 1)
+  entry  2 types 'c'
+  entry  3 types 'd'
+  entry  4 types 'e'
+  entry  5 types 'f'
+  entry  6 types 'g'
+  entry  7 types 'h'
+  entry  8 types 'i'
+  entry  9 types 'j'
+  entry 10 types 'k'
