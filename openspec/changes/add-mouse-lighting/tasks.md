@@ -32,7 +32,7 @@
 
 ## 3. App: Mouse section
 
-- [ ] 3.1 Add the Mouse group (D8). Verify by AT-SPI: the status row, the switch reaching `SetMouseMatch`, the own-setting rows appearing only with matching off and sending `SetMouseLighting`, and the group hidden against an older service
+- [x] 3.1 Add the Mouse group (D8). Verify by AT-SPI: the status row, the switch reaching `SetMouseMatch`, the own-setting rows appearing only with matching off and sending `SetMouseLighting`, and the group hidden against an older service
 
 ## 4. Docs and checks
 
