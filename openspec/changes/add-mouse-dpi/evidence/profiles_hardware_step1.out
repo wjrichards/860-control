@@ -1,0 +1,15 @@
+backup before: none
+SetMouseProfile 5: 2 ms, default 1, [800 1600 3200]
+MouseProfiles: a(yyyaq) 5 1 1 1 4 1200 2400 3200 6400 2 1 2 4 400 800 1600 2400 3 2 0 1 2400 4 1 0 1 3200 5 2 1 3 800 1600 3200
+MouseActiveProfile: y 4
+backup after: 3307 bytes
+backup sectors: [0, 1, 2, 3, 4, 5]
+  sector 0: equals spike 6 True
+  sector 1: equals spike 6 True
+  sector 2: equals spike 6 True
+  sector 3: equals spike 6 True
+  sector 4: equals spike 6 True
+  sector 5: equals spike 6 True
+--- service log:
+saved the mouse's profiles to /var/home/wrichards/.config/g512-control/mouse-profiles-backup.txt
+mouse profile 5: 2 ms, DPI [800, 1600, 3200], default step 2

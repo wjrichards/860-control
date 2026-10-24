@@ -26,7 +26,7 @@
   - a mouse without readable profiles still does lighting
 - [x] 2.2 `g512d --restore-mouse-profiles FILE` (D3). Verify on the fake that it writes only CRC-valid user sectors from the file and checks each read-back
 - [x] 2.3 D-Bus members (D6). Verify on a private bus with no devices that they read as empty or zero and that invalid edits are refused
-- [ ] 2.4 Install the service (with the user's OK for the restart) and check on the mouse with the user:
+- [x] 2.4 Install the service (with the user's OK for the restart) and check on the mouse with the user:
   - the backup file appears and matches the spike 6 backup;
   - editing an inactive profile, then the active one: the DPI buttons cycle the new steps, and the default holds after a replug;
   - a report-rate change;

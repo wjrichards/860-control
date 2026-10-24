@@ -60,3 +60,33 @@ The fake mouse holds the real sectors 0–5 from spike 6 (`g512-hidpp/src/fixtur
 - `MouseProfiles` is an empty array, `MouseActiveProfile` is 0, and `MouseDpiRange` is `(0, 0, 0)`.
 - `SetMouseProfile` and `SetMouseActiveProfile` are refused with "the mouse is not connected", and no backup file is written.
 - `g512d --restore-mouse-profiles` says "no G502 HERO found" and exits with 1.
+
+## 2.4 On the mouse (installed service)
+
+The service and app from this branch were installed with the user's OK (g512d 07:17 and 07:19, app at 07:20). On connect, the service read all five profiles, matching spike 6. Profile 4 was active, and the range was 100–25600 in steps of 50.
+
+**Step 1, an inactive profile** (`profiles_hardware_step1.out`): `SetMouseProfile 5` with 2 ms, default 1, [800, 1600, 3200].
+- The service logged "saved the mouse's profiles to …/mouse-profiles-backup.txt", then the write.
+- **All six backed-up sectors (0–5) equal the spike 6 backup.**
+- `MouseProfiles` shows profile 5 changed. Profile 4 stayed active and unchanged.
+
+**Step 2, the active profile** (`profiles_hardware_step2.out`): `SetMouseProfile 4` with 4 ms (250 Hz), default 0, [800, 1600, 3200].
+- `read_dpi.py` showed the mouse at **800 DPI** straight away, so a write to the active profile applies without re-selecting it.
+- The user pressed DPI-up twice and reported "Pointer got faster".
+- AdjustableDpi `getSensorDpi` and OnboardProfiles `getCurrentDpiIndex` still read 800 and index 0 afterwards.
+
+**Finding:** in onboard mode, those two reads report the profile's default step, not the step the DPI buttons have moved to. The app doesn't show the current step, so nothing depends on them. The user's observation is the evidence that the buttons cycle the new steps.
+
+**Step 3, report rate:** 4 ms was written as part of step 2 and verified by the read-back. A rate change can't be seen by eye, and `0x8060` isn't allowlisted for reading it.
+
+**Steps 4 and 5, switch and restore** (`profiles_hardware_step4.out`):
+- `SetMouseActiveProfile 1`: the mouse reads 2400 DPI on profile 1. Back to 4, it reads 800, profile 4's new default.
+- `g512d --restore-mouse-profiles ~/.config/g512-control/mouse-profiles-backup.txt`:
+  - sector 0 was skipped (not a user sector), sectors 1–3 were unchanged, and **sectors 4 and 5 were written**;
+  - it then reported "the running service has re-read the profiles";
+  - `MouseProfiles` shows the original values again, and the mouse reads **3200 DPI on profile 4**, the user's setting before this change;
+  - the backup file still equals spike 6.
+
+**Found and fixed here:** a restore made by the separate `--restore-mouse-profiles` process left the running service showing the edited values. Now:
+- `set_mouse_active_profile` re-reads every profile after switching (test `switching_rereads_profiles_written_elsewhere`);
+- the restore command asks a running service to switch to the already-active profile, so it re-reads.

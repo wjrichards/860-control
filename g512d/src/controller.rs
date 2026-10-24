@@ -478,18 +478,21 @@ impl<O: Opener> Controller<O> {
         self.mouse.as_ref().and_then(|m| m.profiles.as_ref())
     }
 
-    /// Make profile `number` (1-based) the mouse's active one, then re-apply
-    /// the mouse lighting (a profile switch may bring back its stored lighting).
+    /// Make profile `number` (1-based) the mouse's active one, re-read all
+    /// profiles (they may have been written by something else, such as
+    /// `--restore-mouse-profiles`), then re-apply the mouse lighting (a
+    /// switch may bring back the profile's stored lighting).
     pub fn set_mouse_active_profile(&mut self, number: u8) -> Result<(), SetError> {
         let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
         let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
         if number == 0 || number > p.info.profile_count {
             return Err(SetError::Profile(format!("no profile {number}")));
         }
-        let result = profiles::set_current_profile(&mut m.device, &p.info, number)
-            .and_then(|()| profiles::current_profile(&mut m.device));
-        match result {
-            Ok(active) => p.active = active,
+        if let Err(e) = profiles::set_current_profile(&mut m.device, &p.info, number) {
+            return Err(self.mouse_device_error(e));
+        }
+        match Self::read_profiles(&mut m.device) {
+            Ok(fresh) => *p = fresh,
             Err(e) => return Err(self.mouse_device_error(e)),
         }
         self.apply_mouse_logged();
@@ -1441,6 +1444,24 @@ mod tests {
         assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
         assert!(matches!(c.set_mouse_active_profile(6), Err(SetError::Profile(_))));
         assert_eq!(c.mouse_profiles().unwrap().active, 1);
+    }
+
+    #[test]
+    fn switching_rereads_profiles_written_elsewhere() {
+        let (mut c, _, m) = with_mouse("profiles-reread", &[], &["g502"]);
+        c.connect_mouse();
+        // Profile 2 changes on the mouse behind the service's back.
+        let fake = m.borrow().as_ref().unwrap().clone();
+        {
+            let mut dev = g512_hidpp::Device::open(SharedFake(fake.clone())).unwrap();
+            let info = profiles::read_info(&mut dev).unwrap();
+            let sector = info.user_sector(2).unwrap();
+            let edited = profiles::read_sector(&mut dev, &info, sector).unwrap().edited(8, 0, &[100]).unwrap();
+            profiles::write_sector(&mut dev, &info, sector, &edited).unwrap();
+        }
+        assert_eq!(views(&c)[1].3, [400, 800, 1600, 2400], "stale until re-read");
+        c.set_mouse_active_profile(4).unwrap();
+        assert_eq!(views(&c)[1], (2, 8, 0, vec![100]));
     }
 
     #[test]

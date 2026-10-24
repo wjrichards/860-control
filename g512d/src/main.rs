@@ -138,11 +138,23 @@ fn restore_mouse_profiles(file: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = Device::open(transport).and_then(|mut dev| profile_backup::restore(&mut dev, &sectors));
+    let result = Device::open(transport).and_then(|mut dev| {
+        let done = profile_backup::restore(&mut dev, &sectors)?;
+        Ok((done, g512_hidpp::profiles::current_profile(&mut dev)?))
+    });
     match result {
-        Ok(done) => {
+        Ok((done, active)) => {
             for (sector, outcome) in done {
                 println!("sector {sector:#06x}: {outcome:?}");
+            }
+            // A running service holds the profiles in memory: switching to the
+            // active profile makes it read them again.
+            let refreshed = zbus::blocking::Connection::session().and_then(|conn| {
+                conn.call_method(Some(BUS_NAME), OBJECT_PATH, Some(BUS_NAME), "SetMouseActiveProfile", &(active,))
+            });
+            match refreshed {
+                Ok(_) => println!("the running service has re-read the profiles"),
+                Err(e) => println!("the service wasn't refreshed ({e}); it reads the profiles when it starts"),
             }
             ExitCode::SUCCESS
         }
