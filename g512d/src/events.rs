@@ -169,7 +169,9 @@ pub fn spawn_hotplug(ctl: Shared, conn: zbus::blocking::Connection) -> io::Resul
                 continue;
             }
             match ev.action.as_str() {
-                "add" => {
+                // "change" comes from `udevadm trigger`, e.g. right after the
+                // udev rule is installed with the devices already plugged in.
+                "add" | "change" => {
                     let (keyboard, mouse) = {
                         let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
                         (c.device_path().is_some(), c.mouse_path().is_some())
