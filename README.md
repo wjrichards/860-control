@@ -90,7 +90,24 @@ The **Mouse** section of the app appears when the service supports a G502 HERO. 
 
 With **Match Keyboard** off, choose the mouse's own effect, colour, speed and brightness. **Lights** off darkens the mouse too.
 
-The mouse stays in its own onboard-profile mode, so its DPI buttons keep working. Lighting set here isn't written to the mouse, and its stored profiles aren't touched. Unplugged, it shows its own lighting until the service re-applies it.
+The mouse stays in its own onboard-profile mode, so its DPI buttons keep working. Lighting set here isn't written to the mouse. Unplugged, it shows its own lighting until the service re-applies it.
+
+### DPI, report rate and profiles
+
+The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The **Mouse Profile** section shows the active profile:
+- **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away.
+- **Report Rate:** 125, 250, 500 or 1000 Hz.
+- **DPI steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
+
+Changes are **written to the mouse** about 2 seconds after you stop editing, as one write. Because they live on the mouse, they also work on other computers.
+
+Before its first write, the service saves your profiles as they were to `~/.config/g512-control/mouse-profiles-backup.txt`, and never overwrites that file. To put them back:
+
+```sh
+g512d --restore-mouse-profiles ~/.config/g512-control/mouse-profiles-backup.txt
+```
+
+Only the report rate, DPI steps and default step are changed. Button assignments, macros and the profiles' stored lighting are kept as they are.
 
 ## Key maps
 
@@ -170,7 +187,15 @@ busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighti
     io.github.g512control.Lighting1 SetMouseLighting 's(yyy)yy' Breathe 0 0 255 40 100
 busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
     io.github.g512control.Lighting1 SetMouseMatch b true
+
+# Mouse profile 2: 1000 Hz (1 ms), steps 800, 1600, 3200, starting on 1600; then make it active
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseProfile 'yyyaq' 2 1 1 3 800 1600 3200
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseActiveProfile y 2
 ```
+
+`SetMouseProfile(profile, report period in ms, default step index, DPI steps)` writes a profile. The period is 1, 2, 4 or 8 ms, and the index counts from 0. `MouseProfiles`, `MouseActiveProfile` and `MouseDpiRange` describe what's on the mouse.
 
 `SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running. `LightsOn` is false while the keyboard is dark.
 
@@ -192,9 +217,15 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 ## Things to know
 
 - **Don't run it alongside OpenRGB, g810-led or another lighting tool.** They write to the same keyboard and will overwrite each other.
-- **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects and PerKeyLighting. Of PerKeyLighting, only "set keys" and "commit" are used. Both devices also have firmware-update, reset and hidden engineering features, which the code cannot address. The mouse's DPI, report-rate and onboard-profile features aren't used yet.
+- **Only these HID++ features can be called:** Root, FeatureSet, DeviceFwVersion, DeviceName, ColorLedEffects, PerKeyLighting, AdjustableDpi and OnboardProfiles. The code enforces a function list for three of them:
+  - PerKeyLighting: only "set keys" and "commit";
+  - AdjustableDpi: reads only;
+  - OnboardProfiles: never "set mode", so the mouse always stays in onboard mode.
+
+  Both devices also have firmware-update, reset and hidden engineering features, which the code cannot address.
+- **Profile writes go to the mouse's flash memory.** Only the five user profile sectors can be written, never the profile directory or the factory profiles. Every write is read back and checked. Flash wears with writes, so edits are grouped into one write per pause; scripts calling `SetMouseProfile` in a loop are not limited.
 - **Lighting is written to the devices' RAM only,** never to their stored settings.
-- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`, and for the mouse in `openspec/changes/archive/2026-10-24-add-mouse-lighting/evidence/`. That last folder also holds a backup of the mouse's profile memory.
+- **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`, and for the mouse in `openspec/changes/archive/2026-10-24-add-mouse-lighting/evidence/` (which also holds a backup of the mouse's profile memory), and for mouse profiles in `openspec/changes/add-mouse-dpi/evidence/`.
 - **Only the ANSI (US) layout** is drawn and addressed.
 
 ## Development
