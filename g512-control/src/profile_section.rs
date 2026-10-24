@@ -73,8 +73,9 @@ impl ProfileSection {
                 default.set_tooltip_text(Some("Default step"));
                 default.update_property(&[gtk::accessible::Property::Label(&format!("Step {n} is the default"))]);
                 first.get_or_insert_with(|| default.clone());
+                // Not a minus: the spin row has its own − and + buttons.
                 let remove = gtk::Button::builder()
-                    .icon_name("list-remove-symbolic")
+                    .icon_name("user-trash-symbolic")
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .build();
