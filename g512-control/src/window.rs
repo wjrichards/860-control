@@ -14,11 +14,12 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
     editor::{Editor, MapName},
+    mouse_section::MouseSection,
     service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey},
     throttle::Throttle,
 };
 
-const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 const UDEV_RULES: &str = include_str!("../../packaging/70-g512-control.rules");
 
 enum Status {
@@ -52,6 +53,7 @@ pub struct Ui {
     brightness: gtk::Scale,
     nav: adw::NavigationView,
     editor: Rc<Editor>,
+    mouse_section: Rc<MouseSection>,
     keymaps_row: adw::ActionRow,
     keymaps_button: gtk::Button,
     games_group: adw::PreferencesGroup,
@@ -85,7 +87,7 @@ pub fn present(app: &adw::Application) {
     glib::spawn_future_local(ui.run());
 }
 
-fn labelled_scale(label: &str, min: f64, max: f64) -> gtk::Scale {
+pub(crate) fn labelled_scale(label: &str, min: f64, max: f64) -> gtk::Scale {
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, min, max, 1.0);
     scale.set_width_request(200);
     scale.set_valign(gtk::Align::Center);
@@ -96,11 +98,11 @@ fn labelled_scale(label: &str, min: f64, max: f64) -> gtk::Scale {
     scale
 }
 
-fn to_rgba((r, g, b): (u8, u8, u8)) -> gdk::RGBA {
+pub(crate) fn to_rgba((r, g, b): (u8, u8, u8)) -> gdk::RGBA {
     gdk::RGBA::new(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0)
 }
 
-fn from_rgba(c: &gdk::RGBA) -> (u8, u8, u8) {
+pub(crate) fn from_rgba(c: &gdk::RGBA) -> (u8, u8, u8) {
     let ch = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     (ch(c.red()), ch(c.green()), ch(c.blue()))
 }
@@ -189,6 +191,8 @@ impl Ui {
         page.add(&device_group);
         page.add(&lighting_group);
         page.add(&games_group);
+        let mouse_section = MouseSection::new();
+        page.add(&mouse_section.group);
 
         let stack = gtk::Stack::new();
         stack.add_named(&status, Some("status"));
@@ -228,6 +232,7 @@ impl Ui {
             brightness,
             nav,
             editor,
+            mouse_section,
             keymaps_row,
             keymaps_button,
             games_group,
@@ -303,6 +308,36 @@ impl Ui {
                 ui.keys_changed(map, keys);
             }
         });
+        let (on_match, on_lighting, on_idle) = (weak.clone(), weak.clone(), weak.clone());
+        self.mouse_section.connect(
+            move |on| {
+                let Some(ui) = on_match.upgrade() else { return };
+                let Some(bus) = ui.bus.borrow().clone() else { return };
+                glib::spawn_future_local(async move {
+                    if let Err(e) = bus.lighting.set_mouse_match(on).await {
+                        ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                        ui.refresh().await;
+                    }
+                });
+            },
+            move |state| {
+                let Some(ui) = on_lighting.upgrade() else { return };
+                let Some(bus) = ui.bus.borrow().clone() else { return };
+                glib::spawn_future_local(async move {
+                    let result =
+                        bus.lighting.set_mouse_lighting(&state.effect, state.color, state.speed, state.brightness).await;
+                    if let Err(e) = result {
+                        ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                        ui.refresh().await;
+                    }
+                });
+            },
+            move |()| {
+                if let Some(ui) = on_idle.upgrade() {
+                    glib::spawn_future_local(async move { ui.refresh().await });
+                }
+            },
+        );
         let w = weak;
         self.retry.connect_clicked(move |_| {
             if let Some(ui) = w.upgrade() {
@@ -357,8 +392,9 @@ impl Ui {
                 eprintln!("lighting service unavailable: {e}");
                 self.show_status(Status::ServiceMissing);
             }
-            Ok(DeviceState::Connected { name, firmware, effects, state, per_key, lights_on }) => {
+            Ok(DeviceState::Connected { name, firmware, effects, state, per_key, lights_on, mouse }) => {
                 self.show_lights(lights_on);
+                self.mouse_section.show(mouse.as_deref());
                 self.show_per_key(&effects, &per_key);
                 self.show_controls(&name, &firmware, effects, &state)
             }

@@ -1,0 +1,9 @@
+1. start: MouseMatch b false; own-setting rows: combo box: Effect,list item: Colour,list item: Speed,list item: Brightness,
+2. Mouse Brightness set to 60 in the app: MouseLighting (s(yyy)yy) "Breathe" 0 0 255 40 60
+3. Match Keyboard toggled: MouseMatch b false; rows: combo box: Effect,list item: Colour,list item: Speed,list item: Brightness,
+4. toggled again: MouseMatch b false; rows: combo box: Effect,list item: Colour,list item: Speed,list item: Brightness,
+5. Mouse Brightness back to 100: MouseLighting (s(yyy)yy) "Breathe" 0 0 255 40 100
+6. toggled again: MouseMatch b false; rows: combo box: Effect,list item: Colour,list item: Speed,list item: Brightness,
+--- calls to the service, in order:
+ SetMouseLighting STRING "Breathe"; BYTE 0; BYTE 0; BYTE 255; BYTE 40; BYTE 60;
+ SetMouseLighting STRING "Breathe"; BYTE 0; BYTE 0; BYTE 255; BYTE 40; BYTE 100;

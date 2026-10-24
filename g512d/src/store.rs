@@ -1,6 +1,6 @@
 //! The saved settings, `$XDG_CONFIG_HOME/g512-control/state.toml`: the
-//! lighting state, both key maps, the game switch and whether the lights
-//! are on.
+//! lighting state, both key maps, the game switch, whether the lights are
+//! on, and the mouse's settings.
 
 use std::{
     collections::BTreeMap,
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     keymap::{KeyMap, parse_key},
+    mouse::MouseSettings,
     state::{LightingState, effect_from_name, format_hex, parse_hex},
 };
 
@@ -32,11 +33,19 @@ pub struct Settings {
     pub game_switch: bool,
     /// Off shows Off on the keyboard without touching anything else.
     pub lights_on: bool,
+    pub mouse: MouseSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { saved: None, custom: KeyMap::default(), gaming: None, game_switch: false, lights_on: true }
+        Settings {
+            saved: None,
+            custom: KeyMap::default(),
+            gaming: None,
+            game_switch: false,
+            lights_on: true,
+            mouse: MouseSettings::default(),
+        }
     }
 }
 
@@ -69,6 +78,23 @@ struct File {
     custom: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     gaming: Option<BTreeMap<String, String>>,
+    /// Written only once the mouse settings differ from the defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mouse: Option<MouseFile>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MouseFile {
+    #[serde(default = "lights_on_default")]
+    match_keyboard: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effect: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    brightness: Option<u8>,
 }
 
 fn lights_on_default() -> bool {
@@ -158,25 +184,50 @@ fn encode(settings: &Settings) -> String {
         lights_on: settings.lights_on,
         custom: encode_map(&settings.custom),
         gaming: settings.gaming.as_ref().map(encode_map),
+        mouse: (settings.mouse != MouseSettings::default()).then(|| {
+            let own = settings.mouse.own;
+            MouseFile {
+                match_keyboard: settings.mouse.match_keyboard,
+                effect: own.map(|s| s.effect.name().to_string()),
+                color: own.map(|s| format_hex(s.color)),
+                speed: own.map(|s| s.speed),
+                brightness: own.map(|s| s.brightness),
+            }
+        }),
     };
     toml::to_string(&file).expect("settings always serialise")
 }
 
+/// A lighting state from its four file fields: all present, or none.
+fn decode_state(
+    effect: &Option<String>,
+    color: &Option<String>,
+    speed: Option<u8>,
+    brightness: Option<u8>,
+) -> Result<Option<LightingState>, String> {
+    match (effect, color, speed, brightness) {
+        (Some(effect), Some(color), Some(speed), Some(brightness)) => Ok(Some(LightingState {
+            effect: effect_from_name(effect).map_err(|e| e.to_string())?,
+            color: parse_hex(color).ok_or_else(|| format!("invalid colour {color:?}"))?,
+            speed,
+            brightness,
+        })),
+        (None, None, None, None) => Ok(None),
+        _ => Err("effect, color, speed and brightness must be given together".into()),
+    }
+}
+
 fn decode(text: &str) -> Result<Settings, String> {
     let file: File = toml::from_str(text).map_err(|e| e.to_string())?;
-    let saved = match (&file.effect, &file.color, file.speed, file.brightness) {
-        (Some(effect), Some(color), Some(speed), Some(brightness)) => {
-            let state = LightingState {
-                effect: effect_from_name(effect).map_err(|e| e.to_string())?,
-                color: parse_hex(color).ok_or_else(|| format!("invalid colour {color:?}"))?,
-                speed,
-                brightness,
-            };
-            // Range checks against the device happen when the state is applied.
-            Some(Saved { state, pending: file.pending })
-        }
-        (None, None, None, None) => None,
-        _ => return Err("effect, color, speed and brightness must be given together".into()),
+    // Range checks against the device happen when a state is applied.
+    let saved = decode_state(&file.effect, &file.color, file.speed, file.brightness)?
+        .map(|state| Saved { state, pending: file.pending });
+    let mouse = match &file.mouse {
+        Some(m) => MouseSettings {
+            match_keyboard: m.match_keyboard,
+            own: decode_state(&m.effect, &m.color, m.speed, m.brightness).map_err(|e| format!("[mouse]: {e}"))?,
+        },
+        None => MouseSettings::default(),
     };
     Ok(Settings {
         saved,
@@ -184,6 +235,7 @@ fn decode(text: &str) -> Result<Settings, String> {
         gaming: file.gaming.as_ref().map(decode_map).transpose()?,
         game_switch: file.game_switch,
         lights_on: file.lights_on,
+        mouse,
     })
 }
 
@@ -215,6 +267,7 @@ mod tests {
             gaming: None,
             game_switch: true,
             lights_on: false,
+            mouse: MouseSettings::default(),
         };
         store.save(&settings).unwrap();
         assert_eq!(store.load(), settings);
@@ -223,6 +276,7 @@ mod tests {
         assert!(text.contains("[custom]") && text.contains("1a = \"#00ff00\""), "{text}");
         assert!(!text.contains("[gaming]"), "an unedited Gaming map is not written: {text}");
         assert!(text.contains("lights_on = false"), "{text}");
+        assert!(!text.contains("[mouse]"), "default mouse settings are not written: {text}");
 
         let gaming = KeyMap::from_entries([(0x04, Rgb::new(1, 2, 3))]).unwrap();
         let edited = Settings { gaming: Some(gaming), ..settings };
@@ -261,6 +315,40 @@ mod tests {
         let s = store.load();
         assert!(s.lights_on && s.game_switch && s.saved.is_some());
         assert_eq!(s.custom.entries().count(), 1);
+        fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn mouse_settings_round_trip() {
+        let store = temp_store("mouse");
+        let blue = LightingState {
+            effect: Effect::Zone(EffectKind::Breathe),
+            color: Rgb::new(0, 0, 0xff),
+            speed: 30,
+            brightness: 80,
+        };
+        let settings = Settings { mouse: MouseSettings { match_keyboard: false, own: Some(blue) }, ..Default::default() };
+        store.save(&settings).unwrap();
+        assert_eq!(store.load(), settings);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[mouse]") && text.contains("match_keyboard = false"), "{text}");
+        assert!(text.contains("effect = \"Breathe\"") && text.contains("color = \"#0000ff\""), "{text}");
+
+        // Matching off without an own setting yet.
+        let bare = Settings { mouse: MouseSettings { match_keyboard: false, own: None }, ..Default::default() };
+        store.save(&bare).unwrap();
+        assert_eq!(store.load(), bare);
+        fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn file_without_mouse_settings_matches_the_keyboard() {
+        let store = temp_store("change-3");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        let text = "effect = \"Ripple\"\ncolor = \"#3d3846\"\nspeed = 52\nbrightness = 100\npending = false\n\
+                    game_switch = true\nlights_on = true\n";
+        fs::write(store.path(), text).unwrap();
+        assert_eq!(store.load().mouse, MouseSettings::default());
         fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
     }
 

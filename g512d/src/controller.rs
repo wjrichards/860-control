@@ -1,4 +1,5 @@
-//! Owns the keyboard: connection state, applying lighting, and the saved state.
+//! Owns the keyboard and the mouse: connection state, applying lighting, and
+//! the saved state.
 
 use std::{
     io,
@@ -7,7 +8,7 @@ use std::{
 
 use g512_hidpp::{
     Device, Error as HidppError, Feature, Hidraw, Transport,
-    discovery::{SYSFS_HIDRAW, find_lighting_interface},
+    discovery::{Model, SYSFS_HIDRAW, find_lighting_interface},
     effects::{self, EffectKind, EffectParams, Zone},
     info::{self, DeviceInfo},
     perkey::{self, Frame},
@@ -15,6 +16,7 @@ use g512_hidpp::{
 
 use crate::{
     keymap::{Corrections, KeyMap, MapName, compose, map_frame},
+    mouse::{self, KeyboardView, MOUSE_EFFECTS, MouseSettings},
     state::{BRIGHTNESS_MAX, Effect, InvalidState, LightingState},
     store::{Saved, Settings, Store},
 };
@@ -45,10 +47,10 @@ pub enum Opened<T> {
     Failed(io::Error),
 }
 
-/// Finds and opens the keyboard; a fake in tests.
+/// Finds and opens a device's lighting interface; a fake in tests.
 pub trait Opener {
     type Transport: Transport;
-    fn open(&mut self) -> Opened<Self::Transport>;
+    fn open(&mut self, model: Model) -> Opened<Self::Transport>;
 }
 
 pub struct HidrawOpener;
@@ -56,8 +58,8 @@ pub struct HidrawOpener;
 impl Opener for HidrawOpener {
     type Transport = Hidraw;
 
-    fn open(&mut self) -> Opened<Hidraw> {
-        let path = match find_lighting_interface(Path::new(SYSFS_HIDRAW)) {
+    fn open(&mut self, model: Model) -> Opened<Hidraw> {
+        let path = match find_lighting_interface(Path::new(SYSFS_HIDRAW), model) {
             Ok(Some(p)) => p,
             Ok(None) => return Opened::NotFound,
             Err(e) => return Opened::Failed(e),
@@ -84,6 +86,14 @@ struct Connection<T> {
     info: DeviceInfo,
 }
 
+/// The mouse: both zones get the same effect.
+struct MouseConnection<T> {
+    device: Device<T>,
+    path: PathBuf,
+    zones: Vec<Zone>,
+    info: DeviceInfo,
+}
+
 /// What is sent to the keyboard: a zone effect, or a per-key frame.
 enum Output {
     Zone(EffectKind, EffectParams),
@@ -101,6 +111,8 @@ pub struct Controller<O: Opener> {
     game_override: bool,
     /// GameMode reports at least one registered game.
     game_running: bool,
+    mouse: Option<MouseConnection<O::Transport>>,
+    mouse_status: DeviceStatus,
 }
 
 impl<O: Opener> Controller<O> {
@@ -119,6 +131,8 @@ impl<O: Opener> Controller<O> {
             store,
             game_override: false,
             game_running: false,
+            mouse: None,
+            mouse_status: DeviceStatus::Disconnected,
         }
     }
 
@@ -164,7 +178,7 @@ impl<O: Opener> Controller<O> {
         if self.conn.is_some() {
             return true;
         }
-        let (transport, path) = match self.opener.open() {
+        let (transport, path) = match self.opener.open(Model::G512) {
             Opened::Device { transport, path } => (transport, path),
             Opened::NotFound => return self.set_status(DeviceStatus::Disconnected),
             Opened::PermissionDenied => return self.set_status(DeviceStatus::PermissionDenied),
@@ -209,6 +223,12 @@ impl<O: Opener> Controller<O> {
     /// replaces the Gaming map until the next game starts, and turns the
     /// lights on.
     pub fn set_state(&mut self, state: LightingState) -> Result<bool, SetError> {
+        let pending = self.set_keyboard_state(state)?;
+        self.apply_mouse_logged();
+        Ok(pending)
+    }
+
+    fn set_keyboard_state(&mut self, state: LightingState) -> Result<bool, SetError> {
         let offered = if self.conn.is_some() {
             self.offered()
         } else {
@@ -238,8 +258,15 @@ impl<O: Opener> Controller<O> {
         }
     }
 
-    /// Replace a key map; if it is the one shown, the keyboard follows.
+    /// Replace a key map; if it is the one shown, the keyboard (and a
+    /// matching mouse) follows.
     pub fn set_keys(&mut self, name: MapName, map: KeyMap) -> Result<(), SetError> {
+        self.set_keyboard_keys(name, map)?;
+        self.apply_mouse_logged();
+        Ok(())
+    }
+
+    fn set_keyboard_keys(&mut self, name: MapName, map: KeyMap) -> Result<(), SetError> {
         let previous = match name {
             MapName::Custom => std::mem::replace(&mut self.settings.custom, map),
             MapName::Gaming => {
@@ -276,6 +303,7 @@ impl<O: Opener> Controller<O> {
         self.settings.lights_on = on;
         self.persist();
         self.apply_due_logged();
+        self.apply_mouse_logged();
     }
 
     /// Turn the game switch on or off. Turning it on during a game shows
@@ -288,6 +316,7 @@ impl<O: Opener> Controller<O> {
             self.game_override = show_gaming;
             if self.settings.lights_on {
                 self.apply_due_logged();
+                self.apply_mouse_logged();
             }
         }
     }
@@ -315,7 +344,115 @@ impl<O: Opener> Controller<O> {
             eprintln!("last game ended; restoring the saved state");
         }
         self.apply_due_logged();
+        self.apply_mouse_logged();
         true
+    }
+
+    pub fn mouse_status(&self) -> DeviceStatus {
+        self.mouse_status
+    }
+
+    pub fn mouse_info(&self) -> Option<&DeviceInfo> {
+        self.mouse.as_ref().map(|m| &m.info)
+    }
+
+    /// The mouse's hidraw node, when connected.
+    pub fn mouse_path(&self) -> Option<&Path> {
+        self.mouse.as_ref().map(|m| m.path.as_path())
+    }
+
+    /// Effects every mouse zone offers, among [`MOUSE_EFFECTS`]; empty when
+    /// the mouse is not connected.
+    pub fn mouse_offered(&self) -> Vec<Effect> {
+        let Some(m) = &self.mouse else { return Vec::new() };
+        MOUSE_EFFECTS
+            .into_iter()
+            .filter(|&k| m.zones.iter().all(|z| z.find(k).is_some()))
+            .map(Effect::Zone)
+            .collect()
+    }
+
+    /// The mouse's own setting as front ends see it (D5).
+    pub fn mouse_own(&self) -> LightingState {
+        mouse::own_or_default(&self.settings.mouse, self.saved().map(|s| s.state).as_ref())
+    }
+
+    /// Open the mouse if it is not open, and apply what it should show.
+    /// Returns whether it is connected afterwards.
+    pub fn connect_mouse(&mut self) -> bool {
+        if self.mouse.is_some() {
+            return true;
+        }
+        let (transport, path) = match self.opener.open(Model::G502Hero) {
+            Opened::Device { transport, path } => (transport, path),
+            Opened::NotFound => return self.set_mouse_status(DeviceStatus::Disconnected),
+            Opened::PermissionDenied => return self.set_mouse_status(DeviceStatus::PermissionDenied),
+            Opened::Failed(e) => {
+                eprintln!("cannot open mouse: {e}");
+                return self.set_mouse_status(DeviceStatus::Disconnected);
+            }
+        };
+        match Self::setup_mouse(transport, path) {
+            Ok(m) => {
+                eprintln!("mouse connected: {} on {}", m.info.name, m.path.display());
+                self.mouse = Some(m);
+                self.mouse_status = DeviceStatus::Connected;
+                self.apply_mouse_logged();
+                self.mouse.is_some()
+            }
+            Err(HidppError::FeatureMissing(f)) => {
+                eprintln!("mouse lacks {f}; unsupported");
+                self.set_mouse_status(DeviceStatus::Unsupported)
+            }
+            Err(e) => {
+                eprintln!("mouse setup failed: {e}");
+                self.set_mouse_status(DeviceStatus::Disconnected)
+            }
+        }
+    }
+
+    pub fn disconnect_mouse(&mut self) {
+        if self.mouse.take().is_some() {
+            eprintln!("mouse disconnected");
+        }
+        self.mouse_status = DeviceStatus::Disconnected;
+    }
+
+    /// Re-apply what the mouse shows, reconnecting first if needed. Returns
+    /// whether the mouse is connected afterwards.
+    pub fn reapply_mouse(&mut self) -> bool {
+        if self.mouse.is_none() {
+            return self.connect_mouse();
+        }
+        self.apply_mouse_logged();
+        if self.mouse.is_none() {
+            // The node may have been re-created (resume, replug): reopen.
+            return self.connect_mouse();
+        }
+        true
+    }
+
+    /// Give the mouse its own setting: saved, matching off, lights on.
+    /// Returns whether it is pending (the mouse is not connected).
+    pub fn set_mouse_lighting(&mut self, state: LightingState) -> Result<bool, SetError> {
+        let offered: Vec<Effect> = MOUSE_EFFECTS.into_iter().map(Effect::Zone).collect();
+        state.validate(&offered).map_err(SetError::Invalid)?;
+        self.settings.mouse = MouseSettings { match_keyboard: false, own: Some(state) };
+        let was_off = !self.settings.lights_on;
+        self.settings.lights_on = true;
+        self.persist();
+        if was_off {
+            self.apply_due_logged();
+        }
+        self.apply_mouse_logged();
+        Ok(self.mouse.is_none())
+    }
+
+    /// Follow the keyboard, or go back to the mouse's own setting.
+    pub fn set_mouse_match(&mut self, on: bool) {
+        self.settings.mouse.match_keyboard = on;
+        self.persist();
+        self.apply_mouse_logged();
     }
 
     /// Re-apply what is due, reconnecting first if needed. Returns whether
@@ -350,6 +487,54 @@ impl<O: Opener> Controller<O> {
             return Err(HidppError::FeatureMissing(Feature::ColorLedEffects));
         }
         Ok(Connection { device, path, zone: lighting.zones.remove(0), info })
+    }
+
+    fn setup_mouse(transport: O::Transport, path: PathBuf) -> Result<MouseConnection<O::Transport>, HidppError> {
+        let mut device = Device::open(transport)?;
+        if !device.supports(Feature::ColorLedEffects) {
+            return Err(HidppError::FeatureMissing(Feature::ColorLedEffects));
+        }
+        let info = info::read_info(&mut device)?;
+        let zones = effects::discover(&mut device)?.zones;
+        if zones.is_empty() {
+            return Err(HidppError::FeatureMissing(Feature::ColorLedEffects));
+        }
+        Ok(MouseConnection { device, path, zones, info })
+    }
+
+    /// What the mouse should show, from the keyboard's settings and its own.
+    fn mouse_due(&self) -> Option<LightingState> {
+        let gaming = self.settings.gaming();
+        let saved = self.saved().map(|s| s.state);
+        let view = KeyboardView {
+            lights_on: self.settings.lights_on,
+            gaming_shown: self.game_override,
+            saved: saved.as_ref(),
+            custom: &self.settings.custom,
+            gaming: &gaming,
+        };
+        mouse::mouse_state(&view, &self.settings.mouse)
+    }
+
+    /// Show on the mouse what is due. Failures are logged and never reach
+    /// the keyboard's callers; a lost link disconnects the mouse only.
+    fn apply_mouse_logged(&mut self) {
+        let Some(state) = self.mouse_due() else { return };
+        let Some(m) = self.mouse.as_mut() else { return };
+        let Effect::Zone(kind) = state.effect else { return };
+        let result =
+            effects::set_effect_all(&mut m.device, &m.zones, state.device_effect(kind), &state.device_params(kind));
+        if let Err(e) = result {
+            eprintln!("applying mouse lighting failed: {e}");
+            if is_link_error(&e) {
+                self.disconnect_mouse();
+            }
+        }
+    }
+
+    fn set_mouse_status(&mut self, status: DeviceStatus) -> bool {
+        self.mouse_status = status;
+        false
     }
 
     /// Whether `name` is the map on the keyboard right now.
@@ -464,11 +649,13 @@ mod tests {
 
     use super::*;
 
-    /// Hands out queued outcomes; the last fake keyboard opened is shared so
-    /// tests can inspect what was applied.
+    /// Hands out queued outcomes, one queue per model; the last fake opened
+    /// for each is shared so tests can inspect what was applied.
     struct FakeOpener {
         outcomes: VecDeque<&'static str>,
         last: Rc<RefCell<Option<FakeKeyboardHandle>>>,
+        mouse_outcomes: VecDeque<&'static str>,
+        mouse_last: Rc<RefCell<Option<FakeKeyboardHandle>>>,
     }
 
     type FakeKeyboardHandle = Rc<RefCell<FakeKeyboard>>;
@@ -486,7 +673,18 @@ mod tests {
 
     impl Opener for FakeOpener {
         type Transport = SharedFake;
-        fn open(&mut self) -> Opened<SharedFake> {
+        fn open(&mut self, model: Model) -> Opened<SharedFake> {
+            if model == Model::G502Hero {
+                return match self.mouse_outcomes.pop_front().unwrap_or("absent") {
+                    "g502" => {
+                        let fake = Rc::new(RefCell::new(FakeKeyboard::g502_hero()));
+                        *self.mouse_last.borrow_mut() = Some(fake.clone());
+                        Opened::Device { transport: SharedFake(fake), path: "/dev/hidraw10".into() }
+                    }
+                    "denied" => Opened::PermissionDenied,
+                    _ => Opened::NotFound,
+                };
+            }
             match self.outcomes.pop_front().unwrap_or("absent") {
                 "g512" => {
                     let fake = Rc::new(RefCell::new(FakeKeyboard::g512()));
@@ -520,8 +718,33 @@ mod tests {
             fs::write(dir.join("corrections.toml"), text).unwrap();
         }
         let last = Rc::new(RefCell::new(None));
-        let opener = FakeOpener { outcomes: outcomes.iter().copied().collect(), last: last.clone() };
+        let opener = FakeOpener {
+            outcomes: outcomes.iter().copied().collect(),
+            last: last.clone(),
+            mouse_outcomes: VecDeque::new(),
+            mouse_last: Rc::new(RefCell::new(None)),
+        };
         (Controller::new(opener, Store::new(dir.join("state.toml"))), last)
+    }
+
+    type Handle = Rc<RefCell<Option<FakeKeyboardHandle>>>;
+
+    /// A controller with a keyboard and a mouse queued; returns both handles.
+    fn with_mouse(name: &str, outcomes: &[&'static str], mouse: &[&'static str]) -> (Controller<FakeOpener>, Handle, Handle) {
+        let (mut c, kb) = controller(name, outcomes);
+        c.opener.mouse_outcomes = mouse.iter().copied().collect();
+        let m = c.opener.mouse_last.clone();
+        (c, kb, m)
+    }
+
+    /// The last mouse write: (effect index, R, G, B) on zone 0, after
+    /// checking zone 1 got the same.
+    fn mouse_shown(m: &Handle) -> (u8, u8, u8, u8) {
+        let applied = applied(m);
+        let (z1, z0) = (applied[applied.len() - 1], applied[applied.len() - 2]);
+        assert_eq!((z0[0], z1[0]), (0, 1), "both zones, in order");
+        assert_eq!(z0[1..], z1[1..], "same effect on both zones");
+        (z0[1], z0[2], z0[3], z0[4])
     }
 
     fn red() -> LightingState {
@@ -620,7 +843,13 @@ mod tests {
         // A new controller with the same store, as after a login.
         let store = Store::new(c.store.path().to_path_buf());
         let last = Rc::new(RefCell::new(None));
-        let mut c2 = Controller::new(FakeOpener { outcomes: ["g512"].into(), last: last.clone() }, store);
+        let opener = FakeOpener {
+            outcomes: ["g512"].into(),
+            last: last.clone(),
+            mouse_outcomes: VecDeque::new(),
+            mouse_last: Rc::new(RefCell::new(None)),
+        };
+        let mut c2 = Controller::new(opener, store);
         assert!(c2.connect());
         assert_eq!(applied(&last).last().unwrap()[..6], [0, 1, 0, 0, 0xff, 0]);
     }
@@ -874,5 +1103,128 @@ mod tests {
         assert!(!c.settings().lights_on);
         assert_eq!(frames(&last).len(), shown, "an edit while dark is saved, not shown");
         assert_eq!(c.settings().custom, w_red());
+    }
+
+    // Mouse effect indexes (spike 6): Off 0, Static 1, Breathe 2, Cycle 3.
+
+    #[test]
+    fn mouse_matches_the_keyboard() {
+        let (mut c, _, m) = with_mouse("mouse-match", &["g512"], &["g502"]);
+        c.connect();
+        assert!(c.connect_mouse());
+        assert_eq!(c.mouse_status(), DeviceStatus::Connected);
+        assert!(applied(&m).is_empty(), "nothing saved yet: the mouse is left alone");
+        c.set_state(red()).unwrap();
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0), "Static red on both zones");
+        c.set_state(LightingState { effect: Effect::Zone(EffectKind::Breathe), ..red() }).unwrap();
+        assert_eq!(mouse_shown(&m).0, 2, "Breathe");
+        c.set_state(LightingState { effect: Effect::Zone(EffectKind::Wave), ..red() }).unwrap();
+        assert_eq!(mouse_shown(&m).0, 3, "Wave becomes Cycle");
+        c.set_state(ripple()).unwrap();
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0), "Ripple becomes Static in its colour");
+    }
+
+    #[test]
+    fn mouse_follows_custom_and_gaming_maps() {
+        let (mut c, _, m) = with_mouse("mouse-maps", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_keys(MapName::Custom, w_red()).unwrap();
+        c.set_state(custom(100)).unwrap();
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0), "Custom: W's colour");
+        c.set_keys(MapName::Custom, KeyMap::from_entries([(0x04, Rgb::new(9, 9, 9))]).unwrap()).unwrap();
+        assert_eq!(mouse_shown(&m).0, 0, "Custom without W: Off");
+        c.set_state(ripple()).unwrap();
+        c.set_game_switch(true);
+        c.set_game_count(1);
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0x20, 0), "Gaming: the default map's W colour");
+        c.set_game_count(0);
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0), "game over: matching Ripple again");
+    }
+
+    #[test]
+    fn mouse_lights_off_and_on() {
+        let (mut c, _, m) = with_mouse("mouse-lights", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        c.set_lights_on(false);
+        assert_eq!(mouse_shown(&m).0, 0, "Off");
+        c.set_lights_on(true);
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
+    }
+
+    #[test]
+    fn mouse_own_setting() {
+        let (mut c, kb, m) = with_mouse("mouse-own", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        c.set_lights_on(false);
+        let keyboard_writes = applied(&kb).len();
+        let blue = LightingState { color: Rgb::new(0, 0, 0xff), ..red() };
+        assert!(!c.set_mouse_lighting(blue).unwrap(), "connected: not pending");
+        assert!(!c.settings().mouse.match_keyboard && c.settings().lights_on);
+        assert_eq!(mouse_shown(&m), (1, 0, 0, 0xff));
+        assert_eq!(last_zone_effect(&kb), 1, "lights back on: the keyboard shows Static red again");
+        assert!(applied(&kb).len() > keyboard_writes);
+        c.set_state(ripple()).unwrap();
+        assert_eq!(mouse_shown(&m), (1, 0, 0, 0xff), "the keyboard changing doesn't move the mouse");
+        c.set_mouse_match(true);
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0), "matching again");
+        assert!(matches!(
+            c.set_mouse_lighting(LightingState { effect: Effect::Zone(EffectKind::Ripple), ..red() }),
+            Err(SetError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn mouse_errors_never_reach_the_keyboard() {
+        let (mut c, kb, m) = with_mouse("mouse-error", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        m.borrow().as_ref().unwrap().borrow_mut().reject_set_effect = Some(0x02);
+        assert!(!c.set_state(red()).unwrap(), "the keyboard call still succeeds");
+        assert_eq!(last_zone_effect(&kb), 1);
+        assert_eq!(c.mouse_status(), DeviceStatus::Connected, "a refusal isn't a lost link");
+        m.borrow().as_ref().unwrap().borrow_mut().reject_set_effect = None;
+        m.borrow().as_ref().unwrap().borrow_mut().drop_next_reply();
+        c.set_state(ripple()).unwrap();
+        assert_eq!(c.mouse_status(), DeviceStatus::Disconnected, "a lost link disconnects the mouse only");
+        assert_eq!(c.status(), DeviceStatus::Connected);
+    }
+
+    #[test]
+    fn mouse_replug_and_permission() {
+        let (mut c, _, m) = with_mouse("mouse-replug", &["g512"], &["denied", "g502"]);
+        c.connect();
+        c.set_state(red()).unwrap();
+        assert!(!c.connect_mouse());
+        assert_eq!(c.mouse_status(), DeviceStatus::PermissionDenied);
+        assert!(c.reapply_mouse(), "access arrived: connected and applied");
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
+        c.disconnect_mouse();
+        assert_eq!(c.mouse_status(), DeviceStatus::Disconnected);
+        assert!(!c.reapply_mouse(), "nothing plugged in");
+    }
+
+    #[test]
+    fn no_mouse_changes_nothing_for_the_keyboard() {
+        let (mut c, kb, _) = with_mouse("mouse-none", &["g512"], &[]);
+        c.connect();
+        assert!(!c.connect_mouse());
+        assert_eq!(c.mouse_status(), DeviceStatus::Disconnected);
+        c.set_state(red()).unwrap();
+        assert_eq!(last_zone_effect(&kb), 1);
+        assert!(c.mouse_offered().is_empty());
+    }
+
+    #[test]
+    fn mouse_offers_its_four_effects() {
+        let (mut c, _, _) = with_mouse("mouse-offered", &["g512"], &["g502"]);
+        c.connect_mouse();
+        let names: Vec<_> = c.mouse_offered().into_iter().map(Effect::name).collect();
+        assert_eq!(names, ["Off", "Static", "Breathe", "Cycle"]);
+        assert_eq!(c.mouse_info().unwrap().name, "G502 HERO Gaming Mouse");
     }
 }

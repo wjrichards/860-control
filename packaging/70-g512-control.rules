@@ -1,4 +1,6 @@
-# Give the active local session read/write access to the Logitech G512 RGB
-# keyboard's hidraw nodes (USB 046d:c33c) so g512d runs without root.
-# Only this keyboard is matched; other hidraw devices keep root-only access.
+# Give the active local session read/write access to the hidraw nodes of the
+# Logitech G512 RGB keyboard (USB 046d:c33c) and G502 HERO mouse (046d:c08b),
+# so g512d runs without root. Only these two devices are matched; other hidraw
+# devices keep root-only access.
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c33c", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c08b", TAG+="uaccess"

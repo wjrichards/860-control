@@ -1,0 +1,19 @@
+[0s] start: MouseState s "connected" MouseMatch b true State "Ripple" 61 56 70 70 100
+[0s] 1  keyboard Static red -> mouse RED
+[4s] 2  keyboard Breathe green -> mouse BREATHES GREEN
+[13s] 3  keyboard Cycle slow (speed 10) -> mouse CYCLES SLOWLY, same pace as the keyboard
+[20s] 4  keyboard Cycle fast (speed 100) -> mouse CYCLES FAST, same pace
+[26s] 5  keyboard Wave -> mouse CYCLES (nearest effect)
+[32s] 6  keyboard Ripple cyan -> mouse STATIC CYAN
+[36s] 7  simulated game (10 s) -> keyboard Gaming layout, mouse ORANGE-RED; then cyan again
+[40s]    during the game: GameActive b true 
+[49s]    after the game: GameActive b false 
+[49s] 8  lights off -> keyboard AND mouse DARK
+[52s]    lights on -> cyan again
+[55s] 9  mouse's own setting: Breathe blue -> mouse BREATHES BLUE, keyboard stays cyan Ripple
+[62s]    MouseMatch b false MouseLighting (s(yyy)yy) "Breathe" 0 0 255 40 100 
+[62s] 10 matching again, and your own state back
+[62s] done: State (s(yyy)yy) "Ripple" 61 56 70 70 100 MouseMatch b true 
+--- service log:
+game started; showing the Gaming map
+last game ended; restoring the saved state

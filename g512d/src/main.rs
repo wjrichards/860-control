@@ -6,6 +6,7 @@ mod dbus;
 mod events;
 mod gamemode;
 mod keymap;
+mod mouse;
 mod state;
 mod store;
 
@@ -66,12 +67,21 @@ fn main() -> ExitCode {
         }
     }
 
-    ctl.lock().unwrap_or_else(|e| e.into_inner()).connect();
-    let status = ctl.lock().unwrap_or_else(|e| e.into_inner()).status();
-    eprintln!("g512d {} serving {BUS_NAME}; keyboard {}", env!("CARGO_PKG_VERSION"), status.as_str());
+    let (status, mouse) = {
+        let mut c = ctl.lock().unwrap_or_else(|e| e.into_inner());
+        c.connect();
+        c.connect_mouse();
+        (c.status(), c.mouse_status())
+    };
+    eprintln!(
+        "g512d {} serving {BUS_NAME}; keyboard {}, mouse {}",
+        env!("CARGO_PKG_VERSION"),
+        status.as_str(),
+        mouse.as_str()
+    );
     dbus::notify(&conn);
 
-    if status == controller::DeviceStatus::PermissionDenied {
+    if events::either_denied(status, mouse) == controller::DeviceStatus::PermissionDenied {
         if let Err(e) = events::spawn_login_retry(ctl.clone(), conn.clone()) {
             eprintln!("warning: cannot retry opening the keyboard ({e}); replug it to connect");
         }

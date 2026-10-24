@@ -6,14 +6,14 @@ use std::path::Path;
 
 use g512_hidpp::{
     Device, Hidraw,
-    discovery::{SYSFS_HIDRAW, find_lighting_interface},
+    discovery::{Model, SYSFS_HIDRAW, find_lighting_interface},
     effects::{self, EffectKind, EffectParams, Rgb},
     info,
     perkey::{self, Frame, KeyId},
 };
 
 fn open_keyboard() -> (Device<Hidraw>, std::path::PathBuf) {
-    let path = find_lighting_interface(Path::new(SYSFS_HIDRAW))
+    let path = find_lighting_interface(Path::new(SYSFS_HIDRAW), Model::G512)
         .unwrap()
         .expect("G512 lighting interface not found");
     (Device::open(Hidraw::open(&path).unwrap()).unwrap(), path)
