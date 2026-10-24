@@ -1,7 +1,8 @@
-//! An in-memory G512 that answers HID++ requests, for tests.
+//! An in-memory G512 (or G502 HERO) that answers HID++ requests, for tests.
 //!
 //! [`FakeKeyboard::g512`] reproduces what the real keyboard reported to the
-//! read-only probes (`evidence/feature-table.txt`, `evidence/effects-out.txt`).
+//! read-only probes (`evidence/feature-table.txt`, `evidence/effects-out.txt`);
+//! [`FakeKeyboard::g502_hero`] what the mouse reported to spike 6.
 
 use std::{collections::VecDeque, io, time::Duration};
 
@@ -40,6 +41,8 @@ pub struct FakeKeyboard {
     pub applied: Vec<[u8; 16]>,
     /// When set, `setZoneEffect` is answered with this HID++ error code.
     pub reject_set_effect: Option<u8>,
+    /// Limits `reject_set_effect` to this zone.
+    pub reject_zone: Option<u8>,
     /// Per-key entries (key, r, g, b) received since the last commit;
     /// zero-key padding is left out.
     staged_keys: Vec<[u8; 4]>,
@@ -82,9 +85,31 @@ impl FakeKeyboard {
             dropped: None,
             applied: Vec::new(),
             reject_set_effect: None,
+            reject_zone: None,
             staged_keys: Vec::new(),
             frames: Vec::new(),
             reject_set_keys: None,
+        }
+    }
+
+    /// The user's G502 HERO mouse, firmware U1 27.03 build 0010 (spike 6):
+    /// two zones (logo, DPI strip) with Off, Static, Breathe and Cycle.
+    pub fn g502_hero() -> Self {
+        let fx = |id, capabilities, period| FakeEffect { id, capabilities, period };
+        let zone = |location| FakeZone {
+            location,
+            effects: vec![fx(0x0000, 0x0000, 0), fx(0x0001, 0x0005, 0), fx(0x000a, 0xc005, 992), fx(0x0003, 0xc005, 992)],
+        };
+        FakeKeyboard {
+            features: vec![
+                0x0000, 0x0001, 0x8070, 0x0003, 0x0005, 0x1300, 0x18a1, 0x1e00, 0x1e22, 0x1eb0, 0x2201, 0x8060,
+                0x8100, 0x8110, 0x00c2, 0x1801, 0x1802, 0x1806, 0x18b1,
+            ],
+            name: "G502 HERO Gaming Mouse".into(),
+            firmware: vec![fw_entry(0, *b"U1 ", 0x27, 0x03, 0x0010), fw_entry(1, *b"BOT", 0x81, 0x00, 0x0002)],
+            lighting_info: [0x02, 0x00, 0x03, 0x00, 0x00],
+            zones: vec![zone(0x0001), zone(0x0002)],
+            ..FakeKeyboard::g512()
         }
     }
 
@@ -180,7 +205,8 @@ impl FakeKeyboard {
             },
             (0x8070, 3) => {
                 let valid = self.zones.get(p[0] as usize).is_some_and(|z| (p[1] as usize) < z.effects.len());
-                match (valid, self.reject_set_effect) {
+                let rejected = self.reject_set_effect.filter(|_| self.reject_zone.is_none_or(|z| z == p[0]));
+                match (valid, rejected) {
                     (false, _) => err(ERR_INVALID_ARGUMENT),
                     (true, Some(code)) => err(code),
                     (true, None) => {

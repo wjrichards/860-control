@@ -6,8 +6,8 @@
 
 ## 1. Protocol: the mouse model and every zone
 
-- [ ] 1.1 Add `Model` (G512, G502Hero) to `discovery` (D1): the product ID, usage page and required report IDs; `is_lighting_interface` returns the model; `find_lighting_interface` takes one. Verify with unit tests on the real descriptors (the keyboard's, and the mouse's `hidraw9` and `hidraw10` from sysfs): each matches only its own lighting node, and a boot node or another product is ignored
-- [ ] 1.2 Add `set_effect_all` (D2), and give the fake device a zone count. Verify with tests that a two-zone fake gets one `setZoneEffect` per zone with the right indexes, that a rejection from either zone fails the call, and that the keyboard's one-zone path sends the same bytes as before
+- [x] 1.1 Add `Model` (G512, G502Hero) to `discovery` (D1): the product ID, usage page and required report IDs; `is_lighting_interface` returns the model; `find_lighting_interface` takes one. Verify with unit tests on the real descriptors (the keyboard's, and the mouse's `hidraw9` and `hidraw10` from sysfs): each matches only its own lighting node, and a boot node or another product is ignored
+- [x] 1.2 Add `set_effect_all` (D2), and give the fake device a zone count. Verify with tests that a two-zone fake gets one `setZoneEffect` per zone with the right indexes, that a rejection from either zone fails the call, and that the keyboard's one-zone path sends the same bytes as before
 
 ## 2. Service: mouse lighting
 

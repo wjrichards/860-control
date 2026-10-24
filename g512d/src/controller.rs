@@ -7,7 +7,7 @@ use std::{
 
 use g512_hidpp::{
     Device, Error as HidppError, Feature, Hidraw, Transport,
-    discovery::{SYSFS_HIDRAW, find_lighting_interface},
+    discovery::{Model, SYSFS_HIDRAW, find_lighting_interface},
     effects::{self, EffectKind, EffectParams, Zone},
     info::{self, DeviceInfo},
     perkey::{self, Frame},
@@ -57,7 +57,7 @@ impl Opener for HidrawOpener {
     type Transport = Hidraw;
 
     fn open(&mut self) -> Opened<Hidraw> {
-        let path = match find_lighting_interface(Path::new(SYSFS_HIDRAW)) {
+        let path = match find_lighting_interface(Path::new(SYSFS_HIDRAW), Model::G512) {
             Ok(Some(p)) => p,
             Ok(None) => return Opened::NotFound,
             Err(e) => return Opened::Failed(e),

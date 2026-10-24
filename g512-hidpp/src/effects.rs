@@ -231,6 +231,21 @@ pub fn set_effect<T: Transport>(dev: &mut Device<T>, zone: &Zone, kind: EffectKi
     Ok(())
 }
 
+/// Apply `kind` to every zone in `zones` that offers it, in zone order (RAM
+/// only). Fails on the first zone that refuses, or when no zone offers it.
+pub fn set_effect_all<T: Transport>(
+    dev: &mut Device<T>,
+    zones: &[Zone],
+    kind: EffectKind,
+    p: &EffectParams,
+) -> Result<()> {
+    let mut offered = zones.iter().filter(|z| z.find(kind).is_some()).peekable();
+    if offered.peek().is_none() {
+        return Err(Error::EffectUnavailable(kind));
+    }
+    offered.try_for_each(|zone| set_effect(dev, zone, kind, p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +345,65 @@ mod tests {
             set_effect(&mut dev, &zone, EffectKind::Ripple, &params(Rgb::default(), 30, 100)),
             Err(Error::EffectUnavailable(EffectKind::Ripple))
         ));
+    }
+
+    #[test]
+    fn mouse_zones_from_spike_6() {
+        let mut dev = Device::open(FakeKeyboard::g502_hero()).unwrap();
+        let info = discover(&mut dev).unwrap();
+        assert_eq!(info.zones.iter().map(|z| (z.index, z.location)).collect::<Vec<_>>(), [(0, 1), (1, 2)]);
+        for zone in &info.zones {
+            let kinds: Vec<_> = zone.selectable().map(|e| e.kind.unwrap()).collect();
+            assert_eq!(kinds, [EffectKind::Off, EffectKind::Static, EffectKind::Breathe, EffectKind::Cycle]);
+        }
+    }
+
+    #[test]
+    fn set_effect_all_sends_each_zone() {
+        let mut dev = Device::open(FakeKeyboard::g502_hero()).unwrap();
+        let zones = discover(&mut dev).unwrap().zones;
+        set_effect_all(&mut dev, &zones, EffectKind::Static, &params(Rgb::new(0, 0xff, 0), 0, 100)).unwrap();
+        let applied = &dev.transport_mut().applied;
+        assert_eq!(applied.len(), 2);
+        // zone, effect index 1 (Static), R G B, persistence 0
+        assert_eq!(applied[0][..6], [0, 1, 0x00, 0xff, 0x00, 0]);
+        assert_eq!(applied[1][..6], [1, 1, 0x00, 0xff, 0x00, 0]);
+        assert_eq!((applied[0][12], applied[1][12]), (0, 0));
+    }
+
+    #[test]
+    fn set_effect_all_fails_if_any_zone_refuses() {
+        let mut fake = FakeKeyboard::g502_hero();
+        fake.reject_set_effect = Some(0x02);
+        fake.reject_zone = Some(1);
+        let mut dev = Device::open(fake).unwrap();
+        let zones = discover(&mut dev).unwrap().zones;
+        let result = set_effect_all(&mut dev, &zones, EffectKind::Cycle, &params(Rgb::default(), 5000, 100));
+        assert!(matches!(result, Err(Error::Hidpp { code: 0x02, .. })));
+        assert_eq!(dev.transport_mut().applied.len(), 1, "zone 0 accepted, zone 1 refused");
+    }
+
+    #[test]
+    fn set_effect_all_needs_a_zone_offering_it() {
+        let mut dev = Device::open(FakeKeyboard::g502_hero()).unwrap();
+        let zones = discover(&mut dev).unwrap().zones;
+        assert!(matches!(
+            set_effect_all(&mut dev, &zones, EffectKind::Ripple, &params(Rgb::default(), 30, 100)),
+            Err(Error::EffectUnavailable(EffectKind::Ripple))
+        ));
+        assert!(dev.transport_mut().applied.is_empty());
+    }
+
+    #[test]
+    fn set_effect_all_on_the_keyboard_matches_set_effect() {
+        let p = params(Rgb::new(0x12, 0x34, 0x56), 4000, 80);
+        let mut one = Device::open(FakeKeyboard::g512()).unwrap();
+        let zone = discover(&mut one).unwrap().zones.remove(0);
+        set_effect(&mut one, &zone, EffectKind::Breathe, &p).unwrap();
+        let mut all = Device::open(FakeKeyboard::g512()).unwrap();
+        let zones = discover(&mut all).unwrap().zones;
+        set_effect_all(&mut all, &zones, EffectKind::Breathe, &p).unwrap();
+        assert_eq!(one.transport_mut().applied, all.transport_mut().applied);
     }
 
     #[test]
