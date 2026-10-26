@@ -7,7 +7,7 @@
 
 ## 1. Protocol
 
-- [ ] 1.1 Add `ButtonAction` and `Special` with `ProfileSector::buttons` and `with_button` (D1). Verify with tests on the real backup sectors:
+- [x] 1.1 Add `ButtonAction` and `Special` with `ProfileSector::buttons` and `with_button` (D1). Verify with tests on the real backup sectors:
   - profile 1 and 3 decode (Ctrl+C and Ctrl+V on profile 3, G-shift);
   - `with_button` changes only that entry and the CRC;
   - entry 0 and `Other` are refused;

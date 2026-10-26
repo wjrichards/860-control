@@ -1,11 +1,14 @@
 //! Onboard profiles (`0x8100`) on the G502 HERO: reading the user profile
-//! sectors, editing their DPI steps and report rate, writing them back with
-//! a read-back check, and switching the active profile (spike 7).
+//! sectors, editing their DPI steps, report rate and button actions, writing
+//! them back with a read-back check, and switching the active profile
+//! (spikes 7 and 8).
 //!
 //! Only user profile sectors can be written: [`UserSector`] can be made for
 //! sectors 1 to the profile count and nothing else, so the profile directory
 //! (sector 0) and the ROM sectors (`0x01xx`) are out of reach. The onboard
 //! mode is never changed ([`Feature::allows`] refuses `setOnboardMode`).
+//! Left click (button entry 0) can't be changed, and entries this module
+//! doesn't understand are kept byte for byte.
 
 use crate::{Device, Error, Feature, Result, Transport};
 
@@ -30,6 +33,10 @@ const DPI: usize = 3;
 pub const MAX_DPI_STEPS: usize = 5;
 /// Report periods the profile can hold, in milliseconds (1000 to 125 Hz).
 pub const REPORT_RATES_MS: [u8; 4] = [1, 2, 4, 8];
+/// Profile format 2: the button table, 4 bytes per button, room for 16.
+const BUTTONS: usize = 0x20;
+const BUTTON_SIZE: usize = 4;
+const MAX_BUTTONS: u8 = 16;
 /// Marks a step size, rather than a value, in the sensor's DPI list.
 const DPI_STEP_MARKER: u16 = 0xe000;
 
@@ -38,6 +45,7 @@ const DPI_STEP_MARKER: u16 = 0xe000;
 pub struct ProfilesInfo {
     pub format: u8,
     pub profile_count: u8,
+    pub button_count: u8,
     pub sector_count: u8,
     pub sector_size: u16,
 }
@@ -77,13 +85,93 @@ impl DpiRange {
     }
 }
 
+/// A mouse function a button can run (`90 cc`, spike 8 and libratbag).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Special {
+    WheelLeft = 0x01,
+    WheelRight = 0x02,
+    DpiUp = 0x03,
+    DpiDown = 0x04,
+    DpiCycle = 0x05,
+    DpiShift = 0x07,
+    ProfileCycle = 0x0a,
+    GShift = 0x0b,
+}
+
+impl Special {
+    pub const ALL: [Special; 8] = [
+        Special::WheelLeft,
+        Special::WheelRight,
+        Special::DpiUp,
+        Special::DpiDown,
+        Special::DpiCycle,
+        Special::DpiShift,
+        Special::ProfileCycle,
+        Special::GShift,
+    ];
+
+    pub fn from_code(code: u8) -> Option<Special> {
+        Special::ALL.into_iter().find(|s| *s as u8 == code)
+    }
+}
+
+/// What one button does, as one 4-byte entry of the button table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonAction {
+    /// `80 01 hi lo`: mouse buttons (1 left, 2 right, 4 middle, 8 back, 16 forward).
+    Mouse(u16),
+    /// `80 02 mm kk`: a key, HID usage `kk`, with modifier bits `mm`
+    /// (Ctrl 1, Shift 2, Alt 4, Super 8).
+    Key { modifiers: u8, usage: u8 },
+    /// `80 03 hi lo`: a consumer (media) usage.
+    Media(u16),
+    /// `90 cc 00 00`: a mouse function.
+    Special(Special),
+    /// `80 01 00 00`: no mouse buttons, so the button does nothing.
+    Disabled,
+    /// Anything else (macros, unknown types): shown, never written.
+    Other([u8; 4]),
+}
+
+impl ButtonAction {
+    pub fn decode(entry: [u8; 4]) -> ButtonAction {
+        match entry {
+            [0x80, 0x01, 0, 0] => ButtonAction::Disabled,
+            [0x80, 0x01, hi, lo] => ButtonAction::Mouse(u16::from_be_bytes([hi, lo])),
+            [0x80, 0x02, modifiers, usage] => ButtonAction::Key { modifiers, usage },
+            [0x80, 0x03, hi, lo] => ButtonAction::Media(u16::from_be_bytes([hi, lo])),
+            [0x90, code, _, _] => Special::from_code(code).map_or(ButtonAction::Other(entry), ButtonAction::Special),
+            _ => ButtonAction::Other(entry),
+        }
+    }
+
+    /// The entry for this action; `Other` and an empty mouse mask have none.
+    pub fn encode(self) -> Result<[u8; 4]> {
+        Ok(match self {
+            ButtonAction::Mouse(0) => return Err(Error::InvalidProfile("an empty mouse-button mask".into())),
+            ButtonAction::Mouse(mask) => {
+                let [hi, lo] = mask.to_be_bytes();
+                [0x80, 0x01, hi, lo]
+            }
+            ButtonAction::Key { modifiers, usage } => [0x80, 0x02, modifiers, usage],
+            ButtonAction::Media(usage) => {
+                let [hi, lo] = usage.to_be_bytes();
+                [0x80, 0x03, hi, lo]
+            }
+            ButtonAction::Special(s) => [0x90, s as u8, 0, 0],
+            ButtonAction::Disabled => [0x80, 0x01, 0, 0],
+            ButtonAction::Other(_) => return Err(Error::InvalidProfile("an entry this program can't write".into())),
+        })
+    }
+}
+
 /// A whole profile sector whose CRC has been checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProfileSector(Vec<u8>);
 
 impl ProfileSector {
     pub fn parse(bytes: Vec<u8>) -> Result<Self> {
-        if bytes.len() < DPI + 2 * MAX_DPI_STEPS + 2 {
+        if bytes.len() < BUTTONS + BUTTON_SIZE * usize::from(MAX_BUTTONS) + 2 {
             return Err(Error::InvalidProfile(format!("{} bytes is too short for a profile", bytes.len())));
         }
         let (body, stored) = bytes.split_at(bytes.len() - 2);
@@ -113,6 +201,42 @@ impl ProfileSector {
             .collect()
     }
 
+    /// The first `count` button entries (`getInfo`'s button count).
+    pub fn buttons(&self, count: u8) -> Vec<ButtonAction> {
+        (0..usize::from(count.min(MAX_BUTTONS)))
+            .map(|i| self.button_entry(i))
+            .map(ButtonAction::decode)
+            .collect()
+    }
+
+    fn button_entry(&self, index: usize) -> [u8; 4] {
+        let at = BUTTONS + BUTTON_SIZE * index;
+        [self.0[at], self.0[at + 1], self.0[at + 2], self.0[at + 3]]
+    }
+
+    /// This profile with button `index` set to `action`. Every other byte is
+    /// kept and the CRC is recomputed. Left click (entry 0) is refused.
+    pub fn with_button(&self, index: u8, action: ButtonAction) -> Result<ProfileSector> {
+        if index == 0 {
+            return Err(Error::InvalidProfile("left click can't be changed".into()));
+        }
+        if index >= MAX_BUTTONS {
+            return Err(Error::InvalidProfile(format!("no button {index}")));
+        }
+        let entry = action.encode()?;
+        let at = BUTTONS + BUTTON_SIZE * usize::from(index);
+        let mut b = self.0.clone();
+        b[at..at + BUTTON_SIZE].copy_from_slice(&entry);
+        Ok(ProfileSector::with_crc(b))
+    }
+
+    fn with_crc(mut b: Vec<u8>) -> ProfileSector {
+        let n = b.len();
+        let c = crc(&b[..n - 2]);
+        b[n - 2..].copy_from_slice(&c.to_be_bytes());
+        ProfileSector(b)
+    }
+
     /// This profile with a new report rate, default step and DPI steps.
     /// Every other byte is kept; the switched DPI index too, unless it
     /// would point past the new steps. The CRC is recomputed.
@@ -136,10 +260,7 @@ impl ProfileSector {
             let d = dpis.get(i).copied().unwrap_or(0);
             b[DPI + 2 * i..DPI + 2 * i + 2].copy_from_slice(&d.to_le_bytes());
         }
-        let n = b.len();
-        let c = crc(&b[..n - 2]);
-        b[n - 2..].copy_from_slice(&c.to_be_bytes());
-        Ok(ProfileSector(b))
+        Ok(ProfileSector::with_crc(b))
     }
 }
 
@@ -161,11 +282,15 @@ pub fn read_info<T: Transport>(dev: &mut Device<T>) -> Result<ProfilesInfo> {
     let info = ProfilesInfo {
         format: r[1],
         profile_count: r[3],
+        button_count: r[5],
         sector_count: r[6],
         sector_size: u16::from_be_bytes([r[7], r[8]]),
     };
     if info.format != PROFILE_FORMAT {
         return Err(Error::UnsupportedProfileFormat(info.format));
+    }
+    if info.button_count > MAX_BUTTONS {
+        return Err(Error::Protocol(format!("{} buttons", info.button_count)));
     }
     if info.sector_size == 0 || usize::from(info.sector_size) % CHUNK != 0 {
         return Err(Error::Protocol(format!("sector size {}", info.sector_size)));
@@ -255,7 +380,10 @@ mod tests {
     fn reads_the_real_profiles() {
         let mut dev = mouse();
         let info = read_info(&mut dev).unwrap();
-        assert_eq!((info.format, info.profile_count, info.sector_count, info.sector_size), (2, 5, 16, 256));
+        assert_eq!(
+            (info.format, info.profile_count, info.button_count, info.sector_count, info.sector_size),
+            (2, 5, 11, 16, 256)
+        );
         let profiles: Vec<_> = (1..=5)
             .map(|n| read_sector(&mut dev, &info, info.user_sector(n).unwrap()).unwrap())
             .map(|p| (p.report_rate_ms(), p.default_index(), p.dpis()))
@@ -303,6 +431,87 @@ mod tests {
         odd[n - 2..].copy_from_slice(&c.to_be_bytes());
         let odd = ProfileSector::parse(odd).unwrap();
         assert_eq!(odd.edited(1, 0, &[1600]).unwrap().bytes()[SWITCHED_INDEX], 0);
+    }
+
+    fn profile(n: u8) -> ProfileSector {
+        let mut dev = mouse();
+        let info = read_info(&mut dev).unwrap();
+        read_sector(&mut dev, &info, info.user_sector(n).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn decodes_the_real_buttons() {
+        use ButtonAction::{Key, Mouse};
+        let special = ButtonAction::Special;
+        let mouse_buttons = [Mouse(1), Mouse(2), Mouse(4), Mouse(8), Mouse(16)];
+        let wheel = [special(Special::WheelRight), special(Special::WheelLeft)];
+        let p1 = profile(1).buttons(11);
+        assert_eq!(p1[..5], mouse_buttons);
+        assert_eq!(
+            p1[5..9],
+            [
+                special(Special::DpiShift),
+                special(Special::DpiDown),
+                special(Special::DpiUp),
+                special(Special::ProfileCycle)
+            ]
+        );
+        assert_eq!(p1[9..], wheel);
+        let p3 = profile(3).buttons(11);
+        assert_eq!(p3[..5], mouse_buttons);
+        assert_eq!(
+            p3[5..9],
+            [
+                special(Special::GShift),
+                Key { modifiers: 1, usage: 0x06 },
+                Key { modifiers: 1, usage: 0x19 },
+                special(Special::ProfileCycle)
+            ],
+            "G-shift, Ctrl+C, Ctrl+V"
+        );
+        assert_eq!(p3[9..], wheel);
+    }
+
+    #[test]
+    fn with_button_changes_only_its_entry() {
+        let p5 = profile(5);
+        let f13 = ButtonAction::Key { modifiers: 0, usage: 0x68 };
+        let e = p5.with_button(8, f13).unwrap();
+        let changed: Vec<usize> = (0..256).filter(|&i| e.bytes()[i] != p5.bytes()[i]).collect();
+        assert!(changed.iter().all(|&i| (0x40..0x44).contains(&i) || i >= 254), "{changed:?}");
+        assert_eq!(&e.bytes()[0x40..0x44], [0x80, 0x02, 0x00, 0x68]);
+        assert!(ProfileSector::parse(e.bytes().to_vec()).is_ok(), "the new CRC is valid");
+        assert_eq!(e.buttons(11)[8], f13);
+        // Untouched specials keep their ff ff tails.
+        assert_eq!(&e.bytes()[0x34..0x38], [0x90, 0x07, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn with_button_refuses_left_click_and_other() {
+        let p = profile(4);
+        assert!(matches!(p.with_button(0, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(16, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(3, ButtonAction::Other([0, 1, 2, 3])), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(3, ButtonAction::Mouse(0)), Err(Error::InvalidProfile(_))));
+    }
+
+    #[test]
+    fn actions_round_trip() {
+        let actions = [
+            ButtonAction::Mouse(4),
+            ButtonAction::Key { modifiers: 0x05, usage: 0x2c },
+            ButtonAction::Media(0x00cd),
+            ButtonAction::Disabled,
+        ]
+        .into_iter()
+        .chain(Special::ALL.map(ButtonAction::Special));
+        for a in actions {
+            assert_eq!(ButtonAction::decode(a.encode().unwrap()), a, "{a:?}");
+        }
+        // Unknown entries decode as Other with their bytes.
+        for entry in [[0x00, 0x01, 0x02, 0x03], [0x90, 0x06, 0, 0], [0xff; 4]] {
+            assert_eq!(ButtonAction::decode(entry), ButtonAction::Other(entry));
+        }
     }
 
     #[test]
