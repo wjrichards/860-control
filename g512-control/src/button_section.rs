@@ -48,7 +48,6 @@ impl ButtonSection {
                     let b = gtk::Button::builder().label("Change").valign(gtk::Align::Center).build();
                     b.update_property(&[gtk::accessible::Property::Label(&format!("Change {}", button_name(i)))]);
                     row.add_suffix(&b);
-                    row.set_activatable_widget(Some(&b));
                     b
                 });
                 group.add(&row);
@@ -131,6 +130,8 @@ struct ChangeDialog {
     shortcut: Cell<Option<(u8, u8)>>,
     capturing: Cell<bool>,
     on_apply: Handler<ButtonAction>,
+    /// What the button does now: applying it again would only wear the flash.
+    current: ButtonAction,
 }
 
 fn fixed(kind: &str, value: u16) -> ButtonAction {
@@ -199,6 +200,7 @@ impl ChangeDialog {
             shortcut: Cell::new(None),
             capturing: Cell::new(false),
             on_apply: RefCell::new(None),
+            current: current.clone(),
         });
         d.select(current);
 
@@ -283,7 +285,7 @@ impl ChangeDialog {
     }
 
     fn update_apply(&self) {
-        self.apply.set_sensitive(self.chosen().is_some());
+        self.apply.set_sensitive(self.chosen().is_some_and(|a| a != self.current));
     }
 
     fn key_pressed(&self, ctrl: &gtk::EventControllerKey, keyval: gdk::Key, keycode: u32, state: gdk::ModifierType) {
