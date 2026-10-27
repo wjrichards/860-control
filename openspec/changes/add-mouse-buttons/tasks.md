@@ -27,10 +27,10 @@
 ## 3. App
 
 - [x] 3.1 Add the GDK-key-to-HID table and the action descriptions ("Ctrl+C", "DPI up", "Middle click"). Verify with unit tests
-- [ ] 3.2 Add the Mouse Buttons group and the Change dialog (D4), with rows built once. Verify the rows and the left-click row by AT-SPI where the widgets allow; otherwise by hand in 4.3
+- [x] 3.2 Add the Mouse Buttons group and the Change dialog (D4), with rows built once. Verify the rows and the left-click row by AT-SPI where the widgets allow; otherwise by hand in 4.3
 
 ## 4. Docs and checks
 
 - [x] 4.1 README: Mouse Buttons, the actions, left click fixed, G9 and the 2 s watch, `busctl` examples
 - [x] 4.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, the `gjs` tests, and `openspec validate --strict` for the change and specs
-- [ ] 4.3 Hands-on pass with the user and a call recording: set a shortcut by pressing it, set a mouse function, set a media key and "disabled" if offered, check that left click has no Change; then restore
+- [x] 4.3 Hands-on pass with the user and a call recording: set a shortcut by pressing it, set a mouse function, set a media key and "disabled" if offered, check that left click has no Change; then restore

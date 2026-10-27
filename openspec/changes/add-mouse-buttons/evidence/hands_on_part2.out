@@ -1,0 +1,5 @@
+--- calls (UTC):
+  18:33:15 SetMouseButton  4 2 "media" 233 0
+  18:35:12 SetMouseButton  4 3 "disabled" 0 0
+--- profile 4 now:
+  4 11 "mouse" 1 0 "mouse" 2 0 "media" 233 0 "disabled" 0 0 "mouse" 16 0 "special" 
