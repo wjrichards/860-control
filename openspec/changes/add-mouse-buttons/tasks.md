@@ -16,9 +16,9 @@
 
 ## 2. Service
 
-- [ ] 2.1 Offer `MouseButtons` and add `SetMouseButton` with the D3 validation, the backup and a verified write. Verify with fake-mouse tests: every refusal (button 0, out of range, bad kind or value, `other`), a successful change updating the cache, and a failed write keeping the old value
-- [ ] 2.2 Add the active-profile watch (D3). Verify with a fake-mouse test that a profile changed behind the service's back is picked up, the sector is re-read, lighting is re-applied and a change is reported; and that a lost link disconnects the mouse
-- [ ] 2.3 D-Bus check on a private bus with no devices: `MouseButtons` is empty and `SetMouseButton` is refused
+- [x] 2.1 Offer `MouseButtons` and add `SetMouseButton` with the D3 validation, the backup and a verified write. Verify with fake-mouse tests: every refusal (button 0, out of range, bad kind or value, `other`), a successful change updating the cache, and a failed write keeping the old value
+- [x] 2.2 Add the active-profile watch (D3). Verify with a fake-mouse test that a profile changed behind the service's back is picked up, the sector is re-read, lighting is re-applied and a change is reported; and that a lost link disconnects the mouse
+- [x] 2.3 D-Bus check on a private bus with no devices: `MouseButtons` is empty and `SetMouseButton` is refused (`evidence/buttons_dbus_check.out`)
 - [ ] 2.4 Install (with the user's OK for the restart) and check on the mouse:
   - remap G9 on profile 4 to Ctrl+C, and the user copies with G9;
   - press G9 under its normal profile-cycle mapping on another profile, and see the app follow within 2 s;

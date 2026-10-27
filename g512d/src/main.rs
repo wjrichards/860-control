@@ -1,6 +1,7 @@
 //! g512d: owns the Logitech G512 keyboard and exposes lighting control on
 //! the session bus as `io.github.g512control.Lighting1`.
 
+mod buttons;
 mod controller;
 mod dbus;
 mod events;
@@ -91,6 +92,9 @@ fn main() -> ExitCode {
     }
     if let Err(e) = events::spawn_hotplug(ctl.clone(), conn.clone()) {
         eprintln!("warning: no hotplug events ({e}); replugging the keyboard will not re-apply lighting");
+    }
+    if let Err(e) = events::spawn_profile_watch(ctl.clone(), conn.clone()) {
+        eprintln!("warning: not following the mouse's active profile ({e}); its profile button won't show here");
     }
     if let Err(e) = events::spawn_resume(ctl.clone(), conn.clone()) {
         eprintln!("warning: no resume events ({e}); lighting will not be re-applied after suspend");

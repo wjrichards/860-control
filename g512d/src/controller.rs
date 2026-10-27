@@ -12,10 +12,11 @@ use g512_hidpp::{
     effects::{self, EffectKind, EffectParams, Zone},
     info::{self, DeviceInfo},
     perkey::{self, Frame},
-    profiles::{self, DpiRange, ProfileSector, ProfilesInfo},
+    profiles::{self, ButtonAction, DpiRange, ProfileSector, ProfilesInfo},
 };
 
 use crate::{
+    buttons,
     keymap::{Corrections, KeyMap, MapName, compose, map_frame},
     mouse::{self, KeyboardView, MOUSE_EFFECTS, MouseSettings},
     profile_backup,
@@ -122,6 +123,11 @@ pub struct ProfileView {
 }
 
 impl MouseProfiles {
+    /// Each profile's button actions, profile 1 first.
+    pub fn buttons(&self) -> Vec<Vec<ButtonAction>> {
+        self.sectors.iter().map(|s| s.buttons(self.info.button_count)).collect()
+    }
+
     pub fn views(&self) -> Vec<ProfileView> {
         (1..)
             .zip(&self.sectors)
@@ -509,18 +515,49 @@ impl<O: Opener> Controller<O> {
         default_index: u8,
         dpis: &[u16],
     ) -> Result<(), SetError> {
+        self.edit_mouse_profile(number, |p, sector| {
+            if let Some(bad) = dpis.iter().find(|&&d| !p.dpi_range.contains(d)) {
+                let r = p.dpi_range;
+                return Err(format!("{bad} DPI is not {} to {} in steps of {}", r.min, r.max, r.step));
+            }
+            sector.edited(report_rate_ms, default_index, dpis).map_err(|e| e.to_string())
+        })?;
+        eprintln!("mouse profile {number}: {report_rate_ms} ms, DPI {dpis:?}, default step {}", default_index + 1);
+        Ok(())
+    }
+
+    /// Set button `button` (0-based, never 0: left click) of profile
+    /// `number` to the action given as (kind, value, modifiers). Saves the
+    /// backup first (once ever); a failed write keeps the previous action.
+    pub fn set_mouse_button(&mut self, number: u8, button: u8, kind: &str, value: u16, modifiers: u8) -> Result<(), SetError> {
+        let action = buttons::from_bus(kind, value, modifiers).map_err(SetError::Profile)?;
+        self.edit_mouse_profile(number, |p, sector| {
+            if button == 0 {
+                return Err("left click can't be changed".into());
+            }
+            if button >= p.info.button_count {
+                return Err(format!("no button {button}; the mouse has {}", p.info.button_count));
+            }
+            sector.with_button(button, action).map_err(|e| e.to_string())
+        })?;
+        eprintln!("mouse profile {number}: button {button} is now {kind} {value:#06x} (modifiers {modifiers:#04x})");
+        Ok(())
+    }
+
+    /// Validate and make an edit of one profile with `edit`, save the
+    /// backup if there is none, write it with a read-back check, and keep
+    /// it. Re-applies the lighting when the profile is the active one.
+    fn edit_mouse_profile(
+        &mut self,
+        number: u8,
+        edit: impl FnOnce(&MouseProfiles, &ProfileSector) -> Result<ProfileSector, String>,
+    ) -> Result<(), SetError> {
         let backup = self.store.path().with_file_name("mouse-profiles-backup.txt");
         let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
         let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
         let sector = p.info.user_sector(number).map_err(|e| SetError::Profile(e.to_string()))?;
-        if let Some(bad) = dpis.iter().find(|&&d| !p.dpi_range.contains(d)) {
-            let r = p.dpi_range;
-            return Err(SetError::Profile(format!("{bad} DPI is not {} to {} in steps of {}", r.min, r.max, r.step)));
-        }
         let index = usize::from(number - 1);
-        let edited = p.sectors[index]
-            .edited(report_rate_ms, default_index, dpis)
-            .map_err(|e| SetError::Profile(e.to_string()))?;
+        let edited = edit(p, &p.sectors[index]).map_err(SetError::Profile)?;
         match profile_backup::save_once(&mut m.device, &p.info, &backup) {
             Ok(true) => eprintln!("saved the mouse's profiles to {}", backup.display()),
             Ok(false) => {}
@@ -530,12 +567,41 @@ impl<O: Opener> Controller<O> {
             return Err(self.mouse_device_error(e));
         }
         p.sectors[index] = edited;
-        let active = p.active == number;
-        eprintln!("mouse profile {number}: {report_rate_ms} ms, DPI {dpis:?}, default step {}", default_index + 1);
-        if active {
+        if p.active == number {
             self.apply_mouse_logged();
         }
         Ok(())
+    }
+
+    /// Read the mouse's active profile, which its own button can change.
+    /// When it moved, re-read that profile (it may have been written
+    /// elsewhere) and re-apply the lighting. Returns whether anything front
+    /// ends see changed, including a lost link disconnecting the mouse.
+    pub fn poll_mouse_profile(&mut self) -> bool {
+        let Some(m) = self.mouse.as_mut() else { return false };
+        let Some(p) = m.profiles.as_mut() else { return false };
+        let result = profiles::current_profile(&mut m.device).and_then(|active| {
+            if active == p.active {
+                return Ok(None);
+            }
+            let fresh = profiles::read_sector(&mut m.device, &p.info, p.info.user_sector(active)?)?;
+            Ok(Some((active, fresh)))
+        });
+        match result {
+            Ok(None) => false,
+            Ok(Some((active, fresh))) => {
+                eprintln!("the mouse switched from profile {} to {active}", p.active);
+                p.sectors[usize::from(active - 1)] = fresh;
+                p.active = active;
+                self.apply_mouse_logged();
+                true
+            }
+            Err(e) => {
+                eprintln!("following the mouse's active profile failed: {e}");
+                self.mouse_device_error(e);
+                self.mouse.is_none()
+            }
+        }
     }
 
     /// A failed profile request: a lost link disconnects the mouse.
@@ -1495,5 +1561,114 @@ mod tests {
         c.connect();
         assert!(c.mouse_profiles().is_none());
         assert!(matches!(c.set_mouse_profile(1, 1, 0, &[800]), Err(SetError::Profile(_))));
+        assert!(matches!(c.set_mouse_button(4, 8, "key", 0x06, 1), Err(SetError::Profile(_))));
+        assert!(!c.poll_mouse_profile(), "nothing to follow");
+    }
+
+    fn button(c: &Controller<FakeOpener>, profile: usize, index: usize) -> ButtonAction {
+        c.mouse_profiles().unwrap().buttons()[profile - 1][index]
+    }
+
+    #[test]
+    fn mouse_buttons_are_read_on_connect() {
+        let (mut c, _, _) = with_mouse("buttons-read", &[], &["g502"]);
+        c.connect_mouse();
+        let all = c.mouse_profiles().unwrap().buttons();
+        assert_eq!(all.len(), 5);
+        assert!(all.iter().all(|p| p.len() == 11));
+        assert_eq!(button(&c, 3, 6), ButtonAction::Key { modifiers: 1, usage: 0x06 }, "Ctrl+C");
+    }
+
+    #[test]
+    fn mouse_button_change_writes_after_a_backup() {
+        let (mut c, _, m) = with_mouse("buttons-edit", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        let writes = applied(&m).len();
+        c.set_mouse_button(4, 8, "key", 0x06, 1).unwrap();
+        assert!(fs::read_to_string(backup_path(&c)).unwrap().contains("sector 0x0004: crc ok"));
+        assert_eq!(button(&c, 4, 8), ButtonAction::Key { modifiers: 1, usage: 0x06 });
+        let fake = m.borrow().as_ref().unwrap().clone();
+        assert_eq!(fake.borrow().profile_writes, [4]);
+        assert_eq!(applied(&m).len(), writes + 2, "the active profile: lighting re-applied");
+        // What the mouse holds now, read straight from the fake.
+        let mut dev = g512_hidpp::Device::open(SharedFake(fake.clone())).unwrap();
+        let info = profiles::read_info(&mut dev).unwrap();
+        let sector = profiles::read_sector(&mut dev, &info, info.user_sector(4).unwrap()).unwrap();
+        assert_eq!(sector.buttons(11)[8], ButtonAction::Key { modifiers: 1, usage: 0x06 });
+        c.set_mouse_button(5, 2, "media", 0x00e9, 0).unwrap();
+        c.set_mouse_button(5, 8, "disabled", 0, 0).unwrap();
+        assert_eq!((button(&c, 5, 2), button(&c, 5, 8)), (ButtonAction::Media(0x00e9), ButtonAction::Disabled));
+    }
+
+    #[test]
+    fn mouse_button_changes_are_validated() {
+        let (mut c, _, m) = with_mouse("buttons-invalid", &[], &["g502"]);
+        c.connect_mouse();
+        for (profile, index, kind, value, modifiers) in [
+            (4, 0, "mouse", 2, 0),
+            (4, 11, "mouse", 2, 0),
+            (4, 255, "mouse", 2, 0),
+            (0, 3, "mouse", 2, 0),
+            (6, 3, "mouse", 2, 0),
+            (4, 3, "mouse", 3, 0),
+            (4, 3, "key", 0x03, 0),
+            (4, 3, "media", 0, 0),
+            (4, 3, "special", 0x06, 0),
+            (4, 3, "disabled", 1, 0),
+            (4, 3, "other", 0, 0),
+            (4, 3, "macro", 1, 0),
+        ] {
+            let result = c.set_mouse_button(profile, index, kind, value, modifiers);
+            assert!(matches!(result, Err(SetError::Profile(_))), "{profile} {index} {kind} {value} {modifiers}");
+        }
+        assert!(m.borrow().as_ref().unwrap().borrow().profile_writes.is_empty());
+        assert!(!backup_path(&c).exists(), "nothing written, not even the backup");
+    }
+
+    #[test]
+    fn failed_button_write_keeps_the_old_action() {
+        let (mut c, _, _) = with_mouse("buttons-corrupt", &[], &["g502-corrupt"]);
+        c.connect_mouse();
+        let result = c.set_mouse_button(2, 8, "key", 0x06, 1);
+        assert!(matches!(result, Err(SetError::Device(HidppError::WriteNotVerified { sector: 2 }))));
+        assert_eq!(button(&c, 2, 8), ButtonAction::Special(profiles::Special::ProfileCycle));
+    }
+
+    #[test]
+    fn watch_follows_a_switch_on_the_mouse() {
+        let (mut c, _, m) = with_mouse("watch-switch", &["g512"], &["g502"]);
+        c.connect();
+        c.connect_mouse();
+        c.set_state(red()).unwrap();
+        assert!(!c.poll_mouse_profile(), "no switch yet");
+        let writes = applied(&m).len();
+        // Profile 2 is edited elsewhere, then G9 makes it active.
+        let fake = m.borrow().as_ref().unwrap().clone();
+        {
+            let mut dev = g512_hidpp::Device::open(SharedFake(fake.clone())).unwrap();
+            let info = profiles::read_info(&mut dev).unwrap();
+            let sector = info.user_sector(2).unwrap();
+            let edited = profiles::read_sector(&mut dev, &info, sector).unwrap().edited(8, 0, &[100]).unwrap();
+            profiles::write_sector(&mut dev, &info, sector, &edited).unwrap();
+        }
+        fake.borrow_mut().current_profile = 2;
+        assert!(c.poll_mouse_profile());
+        assert_eq!(c.mouse_profiles().unwrap().active, 2);
+        assert_eq!(views(&c)[1], (2, 8, 0, vec![100]), "the new profile was re-read");
+        assert_eq!(applied(&m).len(), writes + 2, "lighting re-applied on both zones");
+        assert_eq!(mouse_shown(&m), (1, 0xff, 0, 0));
+        assert!(!c.poll_mouse_profile(), "reported once");
+    }
+
+    #[test]
+    fn watch_disconnects_a_lost_mouse() {
+        let (mut c, _, m) = with_mouse("watch-lost", &[], &["g502"]);
+        c.connect_mouse();
+        m.borrow().as_ref().unwrap().borrow_mut().drop_next_reply();
+        assert!(c.poll_mouse_profile());
+        assert_eq!(c.mouse_status(), DeviceStatus::Disconnected);
+        assert!(!c.poll_mouse_profile());
     }
 }

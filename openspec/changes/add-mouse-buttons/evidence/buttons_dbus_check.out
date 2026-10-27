@@ -1,0 +1,14 @@
+dbus[4064802]: Unable to set up transient service directory: XDG_RUNTIME_DIR "/run/user/1000" is owned by uid 1000, not our uid 0
+hidraw nodes visible: 0
+MouseButtons: a(ya(sqy)) 0 
+SetMouseButton 4, button 8, key 0x06, Ctrl:
+  Call failed: the mouse is not connected
+SetMouseButton 4, button 0 (left click):
+  Call failed: the mouse is not connected
+SetMouseButton 4, button 8, kind other:
+  Call failed: "other" entries can't be written
+backup file written: none
+still running after a profile-watch period: yes
+introspected button members:
+  .SetMouseButton method yysqy - -
+  .MouseButtons property a(ya(sqy)) 0 emits-change
