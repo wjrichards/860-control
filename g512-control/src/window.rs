@@ -13,6 +13,7 @@ use gtk::{gdk, glib};
 use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
+    button_section::ButtonSection,
     editor::{Editor, MapName},
     mouse_section::MouseSection,
     profile_section::ProfileSection,
@@ -56,6 +57,7 @@ pub struct Ui {
     editor: Rc<Editor>,
     mouse_section: Rc<MouseSection>,
     profile_section: Rc<ProfileSection>,
+    button_section: Rc<ButtonSection>,
     keymaps_row: adw::ActionRow,
     keymaps_button: gtk::Button,
     games_group: adw::PreferencesGroup,
@@ -197,6 +199,8 @@ impl Ui {
         page.add(&mouse_section.group);
         let profile_section = ProfileSection::new();
         page.add(&profile_section.group);
+        let button_section = ButtonSection::new();
+        page.add(&button_section.group);
 
         let stack = gtk::Stack::new();
         stack.add_named(&status, Some("status"));
@@ -238,6 +242,7 @@ impl Ui {
             editor,
             mouse_section,
             profile_section,
+            button_section,
             keymaps_row,
             keymaps_button,
             games_group,
@@ -338,6 +343,19 @@ impl Ui {
                 });
             },
         );
+        let on_set = weak.clone();
+        self.button_section.connect(move |(profile, button, action)| {
+            let Some(ui) = on_set.upgrade() else { return };
+            let Some(bus) = ui.bus.borrow().clone() else { return };
+            glib::spawn_future_local(async move {
+                let result =
+                    bus.lighting.set_mouse_button(profile, button, &action.kind, action.value, action.modifiers).await;
+                if let Err(e) = result {
+                    ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                }
+                ui.refresh().await;
+            });
+        });
         let (on_match, on_lighting, on_idle) = (weak.clone(), weak.clone(), weak.clone());
         self.mouse_section.connect(
             move |on| {
@@ -426,6 +444,7 @@ impl Ui {
                 self.show_lights(lights_on);
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
+                self.button_section.show(mouse.as_deref());
                 self.show_per_key(&effects, &per_key);
                 self.show_controls(&name, &firmware, effects, &state)
             }

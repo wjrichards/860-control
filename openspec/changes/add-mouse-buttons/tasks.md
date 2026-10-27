@@ -26,7 +26,7 @@
 
 ## 3. App
 
-- [ ] 3.1 Add the GDK-key-to-HID table and the action descriptions ("Ctrl+C", "DPI up", "Middle click"). Verify with unit tests
+- [x] 3.1 Add the GDK-key-to-HID table and the action descriptions ("Ctrl+C", "DPI up", "Middle click"). Verify with unit tests
 - [ ] 3.2 Add the Mouse Buttons group and the Change dialog (D4), with rows built once. Verify the rows and the left-click row by AT-SPI where the widgets allow; otherwise by hand in 4.3
 
 ## 4. Docs and checks
