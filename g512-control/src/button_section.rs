@@ -46,7 +46,9 @@ impl ButtonSection {
                 let row = adw::ActionRow::builder().title(button_name(i)).visible(false).build();
                 let change = (i > 0).then(|| {
                     let b = gtk::Button::builder().label("Change").valign(gtk::Align::Center).build();
-                    b.update_property(&[gtk::accessible::Property::Label(&format!("Change {}", button_name(i)))]);
+                    // A button is named by its own text; say which row it changes.
+                    let what = format!("Change what {} does", button_name(i));
+                    b.update_property(&[gtk::accessible::Property::Description(&what)]);
                     row.add_suffix(&b);
                     b
                 });
