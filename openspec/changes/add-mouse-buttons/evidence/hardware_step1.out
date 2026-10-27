@@ -1,0 +1,8 @@
+07:03:38 UTC
+SetMouseButton 4 8 key 6 1: ok
+--- profile 4 as the service offers it:
+4 11 "mouse" 1 0 "mouse" 2 0 "mouse" 4 0 "mouse" 8 0 "mouse" 16 0 "special" 7 0 "special" 4 0 "special" 3 0 "key" 6 1 "special" 2 0 "special" 1 0 
+--- the mouse (profile 5 shown by the script; profile 4 via the journal):
+active profile: 4
+g512d 0.1.0 serving io.github.g512control.Lighting1; keyboard connected, mouse connected
+mouse profile 4: button 8 is now key 0x0006 (modifiers 0x01)

@@ -1,0 +1,6 @@
+--- journal:
+--- PropertiesChanged signals (UTC) carrying MouseActiveProfile:
+  18:07:17.745320 MouseActiveProfile = 5
+  18:07:17.745261 MouseActiveProfile = 5
+service now: y 5
+mouse now: active profile: 5

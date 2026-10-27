@@ -1,0 +1,9 @@
+mouse on /dev/hidraw3
+sector 0x0000: Skipped("not a user profile sector")
+sector 0x0001: Unchanged
+sector 0x0002: Unchanged
+sector 0x0003: Unchanged
+sector 0x0004: Written
+sector 0x0005: Unchanged
+the running service has re-read the profiles
+current DPI 3200, active profile 4, DPI index 0
