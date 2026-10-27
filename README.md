@@ -95,7 +95,7 @@ The mouse stays in its own onboard-profile mode, so its DPI buttons keep working
 ### DPI, report rate and profiles
 
 The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The **Mouse Profile** section shows the active profile:
-- **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away.
+- **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away. G9, the button behind the wheel, also switches profiles on the mouse; the app follows within about 2 seconds.
 - **Report Rate:** 125, 250, 500 or 1000 Hz.
 - **DPI steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
 
@@ -107,7 +107,20 @@ Before its first write, the service saves your profiles as they were to `~/.conf
 g512d --restore-mouse-profiles ~/.config/g512-control/mouse-profiles-backup.txt
 ```
 
-Only the report rate, DPI steps and default step are changed. Button assignments, macros and the profiles' stored lighting are kept as they are.
+Only the report rate, DPI steps and default step are changed here. Button assignments, macros and the profiles' stored lighting are kept as they are.
+
+### Buttons
+
+The **Mouse Buttons** section lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. **Change** opens a dialog with:
+- **Mouse Button:** left, right or middle click, back or forward;
+- **Keyboard Shortcut:** choose **Set Shortcut**, then press the keys, for example Ctrl+C. Esc cancels. Letters, digits, F1 to F12, Enter, Tab, Space, Backspace, punctuation, the arrows and Insert, Delete, Home, End, Page Up and Page Down work; the dialog says when a key can't be used;
+- **Media Key:** play/pause, next and previous track, volume up and down, mute;
+- **Mouse Function:** DPI up, down, cycle and shift (sniper), next profile, scroll left and right, G-shift;
+- **Disabled:** the button does nothing.
+
+**Left click** can't be changed, so the mouse can always click. Each change is written to the mouse straight away, behind the same backup as the profiles, and works on other computers too. A button set by another program, such as a macro, shows as "Set elsewhere" and is kept until you change it.
+
+If G9 no longer switches profiles, the app's **Profile** row still does.
 
 ## Key maps
 
@@ -195,7 +208,25 @@ busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighti
     io.github.g512control.Lighting1 SetMouseActiveProfile y 2
 ```
 
-`SetMouseProfile(profile, report period in ms, default step index, DPI steps)` writes a profile. The period is 1, 2, 4 or 8 ms, and the index counts from 0. `MouseProfiles`, `MouseActiveProfile` and `MouseDpiRange` describe what's on the mouse.
+`SetMouseProfile(profile, report period in ms, default step index, DPI steps)` writes a profile. The period is 1, 2, 4 or 8 ms, and the index counts from 0. `MouseProfiles`, `MouseActiveProfile` and `MouseDpiRange` describe what's on the mouse. The service reads the active profile every 2 seconds, so a switch made with G9 shows up.
+
+```sh
+# Profile 4's G9 (button 8) as Ctrl+C: kind "key", HID usage 0x06 (c), modifier bits 1 (Ctrl)
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseButton 'yysqy' 4 8 key 6 1
+# ...and back to cycling profiles (mouse function 0x0a)
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SetMouseButton 'yysqy' 4 8 special 10 0
+```
+
+`SetMouseButton(profile, button, kind, value, modifiers)` changes one button. Buttons count from 0 in the order above, with left click 0 and refused. The kinds are:
+- `mouse`: 1 left, 2 right, 4 middle, 8 back, 16 forward;
+- `key`: a HID keyboard usage, with modifier bits Ctrl 1, Shift 2, Alt 4, Super 8;
+- `media`: a HID consumer usage, such as `0xcd` play/pause or `0xe9` volume up;
+- `special`: 1 scroll left, 2 scroll right, 3 DPI up, 4 DPI down, 5 DPI cycle, 7 DPI shift, 10 next profile, 11 G-shift;
+- `disabled`, with value 0.
+
+Modifiers go only with `key`. `MouseButtons` lists every profile's buttons the same way; `other` marks an entry the service doesn't write, such as a macro.
 
 `SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running. `LightsOn` is false while the keyboard is dark.
 
