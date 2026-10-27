@@ -3,7 +3,7 @@
 ## 0. Spikes
 
 - [x] 0.1 Spike 8: entry order on the user's G502 HERO, and keyboard entries written by us (`evidence/spike8.md`). Entries 0–10 are left, right, wheel click, back, forward, sniper, DPI down, DPI up, G9, tilt right, tilt left; `80 02 00 kk` types the key
-- [ ] 0.2 Spike 9 (D2): on inactive profile 5, set wheel click to `80 03 00 cd` (play/pause) and G9 to `80 01 00 00` (disabled candidate), make it active, and have the user check both. Restore. Record which of media keys and "disabled" to offer
+- [x] 0.2 Spike 9 (D2): on inactive profile 5, set wheel click to `80 03 00 cd` (play/pause) and G9 to `80 01 00 00` (disabled candidate), make it active, and have the user check both. Restore. Record which of media keys and "disabled" to offer (`evidence/spike9.md`: both work, with Volume Up `80 03 00 e9` as the media test; both are offered)
 
 ## 1. Protocol
 

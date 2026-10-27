@@ -1,0 +1,18 @@
+profile 5 buttons before: 80010001 80010002 80010004 80010008 80010010 9007ffff 9004ffff 9003ffff 900affff 9002ffff 9001ffff
+profile 5 buttons after:  80010001 80010002 800300e9 80010008 80010010 9007ffff 9004ffff 9003ffff 80010000 9002ffff 9001ffff
+bytes changed: [41, 43, 64, 65, 66, 67, 254, 255]
+written and read back
+active profile now 5 (was 4)
+  wheel click should raise the volume; G9 should do nothing
+active profile: 5
+profile 5 buttons: 80010001 80010002 800300e9 80010008 80010010 9007ffff 9004ffff 9003ffff 80010000 9002ffff 9001ffff
+mouse on /dev/hidraw3
+sector 0x0000: Skipped("not a user profile sector")
+sector 0x0001: Unchanged
+sector 0x0002: Unchanged
+sector 0x0003: Unchanged
+sector 0x0004: Unchanged
+sector 0x0005: Written
+the running service has re-read the profiles
+active profile: 4
+profile 5 buttons: 80010001 80010002 80010004 80010008 80010010 9007ffff 9004ffff 9003ffff 900affff 9002ffff 9001ffff
