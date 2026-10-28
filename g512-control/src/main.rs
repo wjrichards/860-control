@@ -10,6 +10,7 @@ mod profile_edit;
 mod profile_section;
 mod service;
 mod throttle;
+mod udev;
 mod window;
 
 use adw::prelude::*;

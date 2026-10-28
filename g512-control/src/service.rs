@@ -111,19 +111,38 @@ pub enum DeviceState {
         per_key: PerKey,
         /// `None` on a service without the lights setting.
         lights_on: Option<bool>,
-        /// `None` on a service without mouse support.
-        mouse: Option<Box<Mouse>>,
     },
     Disconnected,
     PermissionDenied,
     Unsupported,
 }
 
+/// Both devices as the service reports them. The mouse is read whatever the
+/// keyboard's state: g512d drives each device on its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub keyboard: DeviceState,
+    /// `None` on a service without mouse support.
+    pub mouse: Option<Box<Mouse>>,
+}
+
 /// Read everything in one `GetAll`. An error means the service is not
 /// reachable (not installed, not running, or crashed).
-pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> {
+pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<Snapshot> {
     let all = props.get_all(InterfaceName::from_static_str_unchecked(INTERFACE)).await?;
-    let get = |key: &str| all.get(key).cloned().ok_or_else(|| zbus::Error::Failure(format!("missing property {key}")));
+    parse_snapshot(&all)
+}
+
+fn parse_snapshot(all: &HashMap<String, OwnedValue>) -> zbus::Result<Snapshot> {
+    Ok(Snapshot { keyboard: parse_keyboard(all)?, mouse: parse_mouse(all)? })
+}
+
+fn get(all: &HashMap<String, OwnedValue>, key: &str) -> zbus::Result<OwnedValue> {
+    all.get(key).map(OwnedValue::try_clone).transpose()?.ok_or_else(|| zbus::Error::Failure(format!("missing property {key}")))
+}
+
+fn parse_keyboard(all: &HashMap<String, OwnedValue>) -> zbus::Result<DeviceState> {
+    let get = |key: &str| get(all, key);
     let device_state: String = get("DeviceState")?.try_into()?;
     Ok(match device_state.as_str() {
         "connected" => DeviceState::Connected {
@@ -132,50 +151,52 @@ pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> 
             effects: parse_effects(get("Effects")?)?,
             state: parse_state(get("State")?)?,
             per_key: PerKey {
-                custom: optional(&all, "CustomKeys")?.unwrap_or_default(),
-                gaming: optional(&all, "GamingKeys")?.unwrap_or_default(),
-                game_switch: optional(&all, "GameSwitch")?.unwrap_or_default(),
-                game_active: optional(&all, "GameActive")?.unwrap_or_default(),
+                custom: optional(all, "CustomKeys")?.unwrap_or_default(),
+                gaming: optional(all, "GamingKeys")?.unwrap_or_default(),
+                game_switch: optional(all, "GameSwitch")?.unwrap_or_default(),
+                game_active: optional(all, "GameActive")?.unwrap_or_default(),
             },
-            lights_on: optional(&all, "LightsOn")?,
-            mouse: match optional::<String>(&all, "MouseState")? {
-                Some(state) => Some(Box::new(Mouse {
-                    state,
-                    name: get("MouseName")?.try_into()?,
-                    effects: parse_effects(get("MouseEffects")?)?,
-                    matching: get("MouseMatch")?.try_into()?,
-                    lighting: parse_state(get("MouseLighting")?)?,
-                    profiles: optional::<Vec<(u8, u8, u8, Vec<u16>)>>(&all, "MouseProfiles")?
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|(number, report_rate_ms, default_index, dpis)| MouseProfile {
-                            number,
-                            report_rate_ms,
-                            default_index,
-                            dpis,
-                        })
-                        .collect(),
-                    active_profile: optional(&all, "MouseActiveProfile")?.unwrap_or(0),
-                    dpi_range: optional(&all, "MouseDpiRange")?.unwrap_or((0, 0, 0)),
-                    buttons: optional::<Vec<(u8, Vec<(String, u16, u8)>)>>(&all, "MouseButtons")?
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|(number, entries)| {
-                            let actions = entries
-                                .into_iter()
-                                .map(|(kind, value, modifiers)| ButtonAction { kind, value, modifiers })
-                                .collect();
-                            (number, actions)
-                        })
-                        .collect(),
-                })),
-                None => None,
-            },
+            lights_on: optional(all, "LightsOn")?,
         },
         "permission-denied" => DeviceState::PermissionDenied,
         "unsupported" => DeviceState::Unsupported,
         _ => DeviceState::Disconnected,
     })
+}
+
+fn parse_mouse(all: &HashMap<String, OwnedValue>) -> zbus::Result<Option<Box<Mouse>>> {
+    let get = |key: &str| get(all, key);
+    let Some(state) = optional::<String>(all, "MouseState")? else { return Ok(None) };
+    Ok(Some(Box::new(Mouse {
+        state,
+        name: get("MouseName")?.try_into()?,
+        effects: parse_effects(get("MouseEffects")?)?,
+        matching: get("MouseMatch")?.try_into()?,
+        lighting: parse_state(get("MouseLighting")?)?,
+        profiles: optional::<Vec<(u8, u8, u8, Vec<u16>)>>(all, "MouseProfiles")?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(number, report_rate_ms, default_index, dpis)| MouseProfile {
+                number,
+                report_rate_ms,
+                default_index,
+                dpis,
+            })
+            .collect(),
+        active_profile: optional(all, "MouseActiveProfile")?.unwrap_or(0),
+        dpi_range: optional(all, "MouseDpiRange")?.unwrap_or((0, 0, 0)),
+        buttons: optional::<Vec<(u8, Vec<(String, u16, u8)>)>>(all, "MouseButtons")?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(number, entries)| {
+                let actions = entries
+                    .into_iter()
+                    .map(|(kind, value, modifiers)| ButtonAction { kind, value, modifiers })
+                    .collect();
+                (number, actions)
+            })
+            .collect(),
+    })))
 }
 
 /// A property added after v1: absent on older services.
@@ -215,5 +236,52 @@ pub fn error_message(e: &zbus::Error) -> String {
             other => other.to_string(),
         },
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zbus::zvariant::Value;
+
+    use super::*;
+
+    fn props(entries: Vec<(&str, Value<'static>)>) -> HashMap<String, OwnedValue> {
+        entries.into_iter().map(|(k, v)| (k.to_string(), OwnedValue::try_from(v).unwrap())).collect()
+    }
+
+    fn mouse_props() -> Vec<(&'static str, Value<'static>)> {
+        vec![
+            ("MouseState", Value::from("connected")),
+            ("MouseName", Value::from("G502 HERO Gaming Mouse")),
+            ("MouseEffects", Value::from(vec![("Static".to_string(), true, false, 0u8, 0u8)])),
+            ("MouseMatch", Value::from(true)),
+            ("MouseLighting", Value::from(("Static".to_string(), (38u8, 162u8, 105u8), 50u8, 100u8))),
+        ]
+    }
+
+    #[test]
+    fn mouse_is_read_while_the_keyboard_is_missing() {
+        let mut entries = vec![("DeviceState", Value::from("disconnected"))];
+        entries.extend(mouse_props());
+        let snap = parse_snapshot(&props(entries)).unwrap();
+        assert_eq!(snap.keyboard, DeviceState::Disconnected);
+        let mouse = snap.mouse.expect("the mouse is reported without the keyboard");
+        assert_eq!((mouse.state.as_str(), mouse.name.as_str()), ("connected", "G502 HERO Gaming Mouse"));
+        assert_eq!(mouse.lighting.color, (38, 162, 105));
+        assert!(mouse.profiles.is_empty() && mouse.buttons.is_empty(), "optional members default to empty");
+    }
+
+    #[test]
+    fn older_service_has_no_mouse() {
+        let snap = parse_snapshot(&props(vec![("DeviceState", Value::from("permission-denied"))])).unwrap();
+        assert_eq!(snap.keyboard, DeviceState::PermissionDenied);
+        assert_eq!(snap.mouse, None);
+    }
+
+    #[test]
+    fn missing_mouse_member_is_an_error() {
+        let mut entries = vec![("DeviceState", Value::from("unsupported"))];
+        entries.extend(mouse_props().into_iter().filter(|(k, _)| *k != "MouseName"));
+        assert!(parse_snapshot(&props(entries)).is_err());
     }
 }

@@ -2,15 +2,15 @@
 
 ## 0. Base
 
-- [ ] 0.1 After `add-mouse-buttons` (PR #11) is merged and archived, rebase this branch onto main. Verify `openspec validate split-keyboard-mouse-views --strict` still passes against the updated main specs, and that the workspace builds in the GNOME SDK.
+- [x] 0.1 After `add-mouse-buttons` (PR #11) is merged and archived, rebase this branch onto main. Verify `openspec validate split-keyboard-mouse-views --strict` still passes against the updated main specs, and that the workspace builds in the GNOME SDK.
 - [ ] 0.2 Add `g512-control/data/g502-top-ink.svg` and `g502-side-ink.svg` (from `evidence/design/mouse-art/`). Verify they're byte-identical to the user's files (`cmp`) and embedded with `include_str!`.
 
 ## 1. Device state per view
 
-- [ ] 1.1 Change `service::snapshot` to return the keyboard state and `Option<Mouse>` separately, reading the mouse properties whatever `DeviceState` says (D2). Verify with unit tests on property maps:
+- [x] 1.1 Change `service::snapshot` to return the keyboard state and `Option<Mouse>` separately, reading the mouse properties whatever `DeviceState` says (D2). Verify with unit tests on property maps:
   - keyboard disconnected and mouse connected gives a mouse;
   - no `MouseState` property gives `None`.
-- [ ] 1.2 Build the "No access" udev command from every non-comment line of `70-g512-control.rules` (D2). Verify with a unit test that the command contains both the c33c and c08b lines, and that it parses back into exactly the rules file's lines.
+- [x] 1.2 Build the "No access" udev command from every non-comment line of `70-g512-control.rules` (D2). Verify with a unit test that the command contains both the c33c and c08b lines, and that it parses back into exactly the rules file's lines.
 
 ## 2. Views
 

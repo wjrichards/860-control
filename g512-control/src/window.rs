@@ -17,12 +17,12 @@ use crate::{
     editor::{Editor, MapName},
     mouse_section::MouseSection,
     profile_section::ProfileSection,
-    service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey},
+    service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
     throttle::Throttle,
+    udev,
 };
 
 pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
-const UDEV_RULES: &str = include_str!("../../packaging/70-g512-control.rules");
 
 enum Status {
     ServiceMissing,
@@ -440,22 +440,25 @@ impl Ui {
                 eprintln!("lighting service unavailable: {e}");
                 self.show_status(Status::ServiceMissing);
             }
-            Ok(DeviceState::Connected { name, firmware, effects, state, per_key, lights_on, mouse }) => {
-                self.show_lights(lights_on);
+            Ok(Snapshot { keyboard, mouse }) => {
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
                 self.button_section.show(mouse.as_deref());
-                self.show_per_key(&effects, &per_key);
-                self.show_controls(&name, &firmware, effects, &state)
+                match keyboard {
+                    DeviceState::Connected { name, firmware, effects, state, per_key, lights_on } => {
+                        self.show_lights(lights_on);
+                        self.show_per_key(&effects, &per_key);
+                        self.show_controls(&name, &firmware, effects, &state)
+                    }
+                    DeviceState::Disconnected => self.show_status(Status::Disconnected),
+                    DeviceState::PermissionDenied => self.show_status(Status::PermissionDenied),
+                    DeviceState::Unsupported => self.show_status(Status::Unsupported),
+                }
             }
-            Ok(DeviceState::Disconnected) => self.show_status(Status::Disconnected),
-            Ok(DeviceState::PermissionDenied) => self.show_status(Status::PermissionDenied),
-            Ok(DeviceState::Unsupported) => self.show_status(Status::Unsupported),
         }
     }
 
     fn show_status(&self, status: Status) {
-        let rule = UDEV_RULES.lines().rfind(|l| !l.trim().is_empty() && !l.starts_with('#')).unwrap_or_default();
         let (icon, title, description, detail, retry) = match status {
             Status::ServiceMissing => (
                 "system-run-symbolic",
@@ -475,9 +478,7 @@ impl Ui {
                 "dialog-password-symbolic",
                 "No Access to the Keyboard",
                 "Install the udev rule once, then unplug and replug the keyboard.",
-                format!(
-                    "echo '{rule}' | sudo tee /etc/udev/rules.d/70-g512-control.rules\nsudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw"
-                ),
+                udev::install_command(udev::RULES),
                 false,
             ),
             Status::Unsupported => (
