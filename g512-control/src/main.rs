@@ -1,9 +1,12 @@
 //! G512 Control: a GNOME app for the Logitech G512 keyboard's lighting. It
 //! only talks to the g512d service over D-Bus and never opens the device.
 
+mod art;
+mod art_area;
 mod button_actions;
 mod button_section;
 mod editor;
+mod keyboard_art;
 mod layout;
 mod mouse_section;
 mod profile_edit;

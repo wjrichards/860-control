@@ -50,25 +50,22 @@
 - **Older services:** `mouse == None` (no `MouseState` property) hides the Mouse page and the switchers (D1).
 - **The udev command** is built from every non-comment line of the rules file, as `printf '%s\n' '<line1>' '<line2>' | sudo tee …`, so it never drops a line. A unit test parses the generated command back into the rules.
 
-### D3. Keyboard illustration: a custom widget drawn with `gtk::Snapshot`
+### D3. Keyboard illustration: an aspect-keeping area drawn with Cairo
 
-- **Drawing:** the widget subclass draws `layout::KEYS` scaled to its width:
-  - rounded rects with `append_border` for outlines;
-  - `push_rounded_clip` plus `append_color` for lit tiles;
-  - a rounded case outline.
+- **Drawing:** `ArtArea` (a small `gtk::Widget` subclass, height-for-width from an aspect ratio) hands a Cairo context, from `Snapshot::append_cairo`, to a draw function. That function draws `layout::KEYS` to the board's proportions (694 × 246, 7 px per quarter key): outlines for unlit keys, filled rounded rects for lit ones, and a rounded case.
 - **Colours:** a pure function, `key_colours(state, maps, frame) -> Vec<Option<Rgb>>`, so it can be unit-tested. It covers:
   - the effect colour;
   - the Custom or Gaming map;
   - lights off;
   - the animation frame (D5).
-- **Click:** the widget is focusable with the accessible role Button and a spoken label (`"G512 keyboard, Ripple, green. Open Key Maps"`). `GestureClick` and Enter open Key Maps. The hover ring uses the accent colour, as on the board.
+- **Click:** the area sits inside a flat `gtk::Button`, which gives focus, Enter, the Button role and a spoken label (`"G512 keyboard, Ripple, green. Open Key Maps"`). App CSS draws the accent ring on hover and focus, as on the board.
 - **Narrow width:** the same widget scales down. Below 400 px it hides nothing; there are no legends at any size.
 - **Alternative rejected:** reusing `editor.rs`'s button grid. That means 104 widgets, CSS recolouring per frame, and no tile/outline look.
 
-### D4. Mouse illustration: the user's SVG paths, drawn with `gsk::Path`
+### D4. Mouse illustration: the user's SVG paths, drawn with Cairo
 
 - **Assets:** `g512-control/data/g502-top-ink.svg` and `g502-side-ink.svg` are embedded with `include_str!`.
-- **Parsing:** a small parser takes each `<path d="…" class="cls-N">` and its layer into `Layer { glow, outline, led }`. The `Logo` group sorts by class, so the side view's LED dashes inside it come out right. Each `d` goes through `gsk::Path::parse`, once, at start-up.
+- **Parsing:** a small parser takes each `<path d="…" class="cls-N">` and its layer into `Layer { glow, outline, led }`. The `Logo` group sorts by class, so the side view's LED dashes inside it come out right. Each `d` is parsed once at start-up into Cairo path commands. The files use only M, L, C and Z, so the parser is small, and it rejects anything else.
 - **The G mark:** the top-view G is a fixed path cut out in the card colour (the same arc and bar as the boards, `build-variants.py`).
 - **Drawing:** layers are drawn in order:
   1. glow, at 20% × the LED level;
@@ -84,6 +81,7 @@
   - **Narrow:** both views on top and the legend in two columns below (the `Mouse drawing narrow` board).
 - **Alternatives rejected:**
   - rasterising the SVG with librsvg: a new crate, a recolour means a re-render, and a G9 overlay is still needed;
+  - `gsk::Path::parse` with snapshot fills: it works too, but Cairo keeps one drawing path for both illustrations;
   - hand-converting the art to Rust code: it loses the user's file as the source.
 
 ### D5. Motion: frame-clock ticks only while visible and animations are on
@@ -114,8 +112,8 @@ The boards' tokens map to libadwaita named colours (`@window_bg_color`, `@card_b
 
 ## Risks / Trade-offs
 
-- **[A path from the SVG fails to parse in `gsk::Path`]** → Parse at start-up with unit tests over every path in both files; a failure fails the tests, not the user.
-- **[Redrawing about 140 paths every frame on slow GPUs]** → Ticks run only while the view is mapped and the effect animates; Static, Custom and Off never tick. The outlines can be cached in a `gsk::RenderNode` and reused between frames.
+- **[A path from the SVG fails to parse]** → Parse at start-up with unit tests over every path in both files; a failure fails the tests, not the user.
+- **[Redrawing about 140 paths every frame on slow GPUs]** → Ticks run only while the view is mapped and the effect animates; Static, Custom and Off never tick. The outlines can be cached in a Cairo recording surface and reused between frames.
 - **[Hotspot rects only roughly follow the button shapes]** → Hovering highlights a rect, not the exact button outline. It's acceptable at this size, and the callouts give a precise target.
 - **[AT-SPI can't drive custom-drawn areas]** → The illustration has a single accessible role and label. Every action it offers is also reachable through real buttons: "Edit Key Maps…", the callouts and the rows.
 - **[`add-mouse-buttons` isn't merged yet]** → This change applies on top of it. Tasks start by rebasing onto main after that merge.

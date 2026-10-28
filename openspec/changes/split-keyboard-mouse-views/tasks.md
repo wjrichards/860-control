@@ -27,12 +27,12 @@
 
 ## 3. Keyboard illustration
 
-- [ ] 3.1 Add `key_colours(state, maps, frame)` for effect colour, Custom and Gaming maps, lights off and Fn (D3). Add `drawing_colour(led, card)` (D6). Verify with unit tests:
+- [x] 3.1 Add `key_colours(state, maps, frame)` for effect colour, Custom and Gaming maps, lights off and Fn (D3). Add `drawing_colour(led, card)` (D6). Verify with unit tests:
   - WASD-only Custom lights exactly 4 keys;
   - lights off lights none;
   - Fn is never lit;
   - #26A269 and #1C71D8 are unchanged, and #101010 is lightened to ≥ 3:1.
-- [ ] 3.2 Add the keyboard illustration widget, drawn with `gtk::Snapshot` from `layout::KEYS`: lit tiles, unlit outlines, the case, and the hover ring (D3). Give it an accessible role and label, and make a click or Enter open Key Maps. Verify:
+- [x] 3.2 Add the keyboard illustration widget, drawn with `gtk::Snapshot` from `layout::KEYS`: lit tiles, unlit outlines, the case, and the hover ring (D3). Give it an accessible role and label, and make a click or Enter open Key Maps. Verify:
   - a screenshot of the running app beside `evidence/design/05-after-keyboard.png`;
   - over AT-SPI, the widget's name and that activating it opens Key Maps.
 

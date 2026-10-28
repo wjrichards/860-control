@@ -15,6 +15,7 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 use crate::{
     button_section::ButtonSection,
     editor::{Editor, MapName},
+    keyboard_art::KeyboardArt,
     mouse_section::MouseSection,
     profile_section::ProfileSection,
     service::{self, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
@@ -23,6 +24,12 @@ use crate::{
 };
 
 pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// The illustrations sit in flat buttons; focus and hover get the accent ring.
+const APP_CSS: &str = "
+.device-art { padding: 0; border-radius: 12px; }
+.device-art:hover, .device-art:focus-visible { outline: 3px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
+";
 
 /// What covers the whole window: the service can't be reached.
 enum Status {
@@ -163,6 +170,9 @@ pub struct Ui {
     button_section: Rc<ButtonSection>,
     keymaps_row: adw::ActionRow,
     keymaps_button: gtk::Button,
+    keyboard_art: Rc<KeyboardArt>,
+    /// The Gaming map is on the keyboard because a game is running.
+    gaming_shown: Cell<bool>,
     games_group: adw::PreferencesGroup,
     game_row: adw::SwitchRow,
     banner: adw::Banner,
@@ -284,7 +294,16 @@ impl Ui {
         let games_group = adw::PreferencesGroup::builder().title("Games").build();
         games_group.add(&game_row);
 
+        if let Some(display) = gdk::Display::default() {
+            let css = gtk::CssProvider::new();
+            css.load_from_string(APP_CSS);
+            gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
+        let keyboard_art = KeyboardArt::new();
+        let art_group = adw::PreferencesGroup::new();
+        art_group.add(&keyboard_art.widget);
         let keyboard_page = adw::PreferencesPage::new();
+        keyboard_page.add(&art_group);
         keyboard_page.add(&device_group);
         keyboard_page.add(&lighting_group);
         keyboard_page.add(&games_group);
@@ -377,6 +396,8 @@ impl Ui {
             button_section,
             keymaps_row,
             keymaps_button,
+            keyboard_art,
+            gaming_shown: Cell::new(false),
             games_group,
             game_row,
             banner,
@@ -434,6 +455,14 @@ impl Ui {
                 if ui.selected_effect().is_some_and(|e| e.name == CUSTOM) {
                     ui.editor.set_target(MapName::Custom);
                 }
+                ui.nav.push_by_tag("keymaps");
+            }
+        });
+        let w = weak.clone();
+        self.keyboard_art.connect_activate(move || {
+            if let Some(ui) = w.upgrade() {
+                // The map being shown, or Custom when neither is.
+                ui.editor.set_target(if ui.gaming_shown.get() { MapName::Gaming } else { MapName::Custom });
                 ui.nav.push_by_tag("keymaps");
             }
         });
@@ -587,6 +616,7 @@ impl Ui {
         };
         *self.bus.borrow_mut() = Some(bus.clone());
         self.refresh().await;
+        self.debug_screenshot();
 
         // The service restarting, or any property change, re-reads everything.
         if let Ok(dbus) = DBusProxy::new(&conn).await
@@ -608,6 +638,27 @@ impl Ui {
             }
             Err(e) => eprintln!("cannot follow lighting changes: {e}"),
         }
+    }
+
+    /// For checks against the design boards: with `G512_CONTROL_SCREENSHOT`
+    /// set to a PNG path, show the view named by `G512_CONTROL_VIEW` (if any)
+    /// and render the window to that file once it has drawn.
+    fn debug_screenshot(&self) {
+        let Ok(path) = std::env::var("G512_CONTROL_SCREENSHOT") else { return };
+        if let Ok(view) = std::env::var("G512_CONTROL_VIEW") {
+            self.view_stack.set_visible_child_name(&view);
+        }
+        let window = self.window.clone();
+        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+            let paintable = gtk::WidgetPaintable::new(Some(&window));
+            let (w, h) = (window.width(), window.height());
+            let snapshot = gtk::Snapshot::new();
+            paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+            let saved = snapshot.to_node().zip(window.native().and_then(|n| n.renderer())).map(|(node, renderer)| {
+                renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32))).save_to_png(&path)
+            });
+            eprintln!("screenshot {path}: {saved:?}");
+        });
     }
 
     async fn refresh(&self) {
@@ -632,6 +683,14 @@ impl Ui {
                 }
                 match keyboard {
                     DeviceState::Connected { name, firmware, effects, state, per_key, lights_on } => {
+                        self.gaming_shown.set(per_key.game_active);
+                        self.keyboard_art.show(
+                            lights_on.unwrap_or(true),
+                            per_key.game_active,
+                            &state,
+                            &per_key.custom,
+                            &per_key.gaming,
+                        );
                         self.show_lights(lights_on);
                         self.show_per_key(&effects, &per_key);
                         self.show_controls(&name, &firmware, effects, &state)
