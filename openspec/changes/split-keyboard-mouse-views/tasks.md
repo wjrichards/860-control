@@ -3,7 +3,7 @@
 ## 0. Base
 
 - [x] 0.1 After `add-mouse-buttons` (PR #11) is merged and archived, rebase this branch onto main. Verify `openspec validate split-keyboard-mouse-views --strict` still passes against the updated main specs, and that the workspace builds in the GNOME SDK.
-- [ ] 0.2 Add `g512-control/data/g502-top-ink.svg` and `g502-side-ink.svg` (from `evidence/design/mouse-art/`). Verify they're byte-identical to the user's files (`cmp`) and embedded with `include_str!`.
+- [x] 0.2 Add `g512-control/data/g502-top-ink.svg` and `g502-side-ink.svg` (from `evidence/design/mouse-art/`). Verify they're byte-identical to the user's files (`cmp`) and embedded with `include_str!`.
 
 ## 1. Device state per view
 
@@ -38,20 +38,20 @@
 
 ## 4. Mouse illustration
 
-- [ ] 4.1 Add the SVG layer parser and `gsk::Path` loading, plus the G cut path (D4). Verify with unit tests:
+- [x] 4.1 Add the SVG layer parser, loading each path as Cairo path commands, plus the G cut path (D4). Verify with unit tests:
   - every `d` in both files parses;
   - the layer counts are as expected: top 52 outline, 3 LED, 1 logo, 2 glow; side 41 outline, 3 LED, 1 logo, 2 glow (counted from the files: `cls-2`, `cls-3`, `cls-1`);
   - an unknown class is an error.
-- [ ] 4.2 Add the mouse illustration widget: glow, outlines, LEDs and logo in the drawing colour; Off; the compact and narrow layouts; the hotspot table and badges (D4). Verify:
+- [x] 4.2 Add the mouse illustration widget: glow, outlines, LEDs and logo in the drawing colour; Off; the compact and narrow layouts; the hotspot table and badges (D4). Verify:
   - a hit-test unit test maps each badge centre to its button;
   - a screenshot beside `05-after-mouse.png` and `05-narrow-mouse.png`.
 
 ## 5. Callouts
 
-- [ ] 5.1 Move `ChangeDialog` to its own module so the rows and the callouts share it. Add the callout legend: 11 buttons, Left Click fixed and insensitive (D7). Make clicking a hotspot on the illustration open the same dialog. Verify:
+- [x] 5.1 Move `ChangeDialog` to its own module so the rows and the callouts share it. Add the callout legend: 11 buttons, Left Click fixed and insensitive (D7). Make clicking a hotspot on the illustration open the same dialog. Verify:
   - over AT-SPI, 11 callout buttons with names, and Left Click insensitive;
   - opening G9's dialog from its callout and from the drawing gives the same dialog.
-- [ ] 5.2 Make the callouts follow the active profile and action changes, including a G9 switch on the mouse. Verify with the fake service changing `MouseActiveProfile` and `MouseButtons` that the callouts update without a restart.
+- [x] 5.2 Make the callouts follow the active profile and action changes, including a G9 switch on the mouse. Verify with the fake service changing `MouseActiveProfile` and `MouseButtons` that the callouts update without a restart.
 
 ## 6. Motion
 

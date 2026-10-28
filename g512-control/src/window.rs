@@ -13,9 +13,11 @@ use gtk::{gdk, glib};
 use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
+    art,
     button_section::ButtonSection,
     editor::{Editor, MapName},
     keyboard_art::KeyboardArt,
+    mouse_art::MouseArt,
     mouse_section::MouseSection,
     profile_section::ProfileSection,
     service::{self, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
@@ -29,7 +31,47 @@ pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 const APP_CSS: &str = "
 .device-art { padding: 0; border-radius: 12px; }
 .device-art:hover, .device-art:focus-visible { outline: 3px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
+.mouse-card { background: #1d1d20; border-radius: 12px; padding: 16px; }
+.callout { min-height: 44px; padding: 4px 10px; }
+.callout-fixed { border: 1px dashed alpha(white, 0.35); }
 ";
+
+/// The views' widths, as on the boards: the keyboard card is 694 px wide,
+/// and the mouse card 760 px so the callouts fit beside the drawing.
+const KEYBOARD_WIDTH: i32 = 694;
+const MOUSE_WIDTH: i32 = 760;
+
+/// A view's scrolling column of groups: `AdwPreferencesPage`'s layout, with
+/// the view's own width in place of its fixed clamp.
+struct Page {
+    widget: gtk::ScrolledWindow,
+    column: gtk::Box,
+}
+
+impl Page {
+    fn new(width: i32) -> Self {
+        let column = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(24)
+            .margin_top(24)
+            .margin_bottom(24)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        let clamp =
+            adw::Clamp::builder().maximum_size(width).tightening_threshold(width * 3 / 4).child(&column).build();
+        let widget = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&clamp)
+            .build();
+        Page { widget, column }
+    }
+
+    fn add(&self, group: &adw::PreferencesGroup) {
+        self.column.append(group);
+    }
+}
 
 /// What covers the whole window: the service can't be reached.
 enum Status {
@@ -171,6 +213,7 @@ pub struct Ui {
     keymaps_row: adw::ActionRow,
     keymaps_button: gtk::Button,
     keyboard_art: Rc<KeyboardArt>,
+    mouse_art: Rc<MouseArt>,
     /// The Gaming map is on the keyboard because a game is running.
     gaming_shown: Cell<bool>,
     games_group: adw::PreferencesGroup,
@@ -302,12 +345,16 @@ impl Ui {
         let keyboard_art = KeyboardArt::new();
         let art_group = adw::PreferencesGroup::new();
         art_group.add(&keyboard_art.widget);
-        let keyboard_page = adw::PreferencesPage::new();
+        let keyboard_page = Page::new(KEYBOARD_WIDTH);
         keyboard_page.add(&art_group);
         keyboard_page.add(&device_group);
         keyboard_page.add(&lighting_group);
         keyboard_page.add(&games_group);
-        let mouse_page = adw::PreferencesPage::new();
+        let mouse_page = Page::new(MOUSE_WIDTH);
+        let mouse_art = MouseArt::new();
+        let mouse_art_group = adw::PreferencesGroup::new();
+        mouse_art_group.add(&mouse_art.widget);
+        mouse_page.add(&mouse_art_group);
         let mouse_section = MouseSection::new();
         mouse_page.add(&mouse_section.group);
         let profile_section = ProfileSection::new();
@@ -320,11 +367,11 @@ impl Ui {
         let keyboard_status = StatusView::new(None);
         let keyboard_stack = gtk::Stack::new();
         keyboard_stack.add_named(&keyboard_status.page, Some("status"));
-        keyboard_stack.add_named(&keyboard_page, Some("controls"));
+        keyboard_stack.add_named(&keyboard_page.widget, Some("controls"));
         let mouse_status = StatusView::new(None);
         let mouse_stack = gtk::Stack::new();
         mouse_stack.add_named(&mouse_status.page, Some("status"));
-        mouse_stack.add_named(&mouse_page, Some("controls"));
+        mouse_stack.add_named(&mouse_page.widget, Some("controls"));
 
         let view_stack = adw::ViewStack::new();
         view_stack.add_titled_with_icon(&keyboard_stack, Some("keyboard"), "Keyboard", "input-keyboard-symbolic");
@@ -397,6 +444,7 @@ impl Ui {
             keymaps_row,
             keymaps_button,
             keyboard_art,
+            mouse_art,
             gaming_shown: Cell::new(false),
             games_group,
             game_row,
@@ -540,6 +588,12 @@ impl Ui {
                 ui.refresh().await;
             });
         });
+        let on_open = weak.clone();
+        self.mouse_art.connect_button(move |index| {
+            if let Some(ui) = on_open.upgrade() {
+                ui.button_section.open_dialog(index);
+            }
+        });
         let (on_match, on_lighting, on_idle) = (weak.clone(), weak.clone(), weak.clone());
         self.mouse_section.connect(
             move |on| {
@@ -577,6 +631,7 @@ impl Ui {
                     if let Some(ui) = w.upgrade() {
                         ui.narrow.set(narrow);
                         ui.update_switchers();
+                        ui.mouse_art.set_compact(!narrow);
                     }
                 };
                 if narrow {
@@ -642,11 +697,18 @@ impl Ui {
 
     /// For checks against the design boards: with `G512_CONTROL_SCREENSHOT`
     /// set to a PNG path, show the view named by `G512_CONTROL_VIEW` (if any)
-    /// and render the window to that file once it has drawn.
+    /// and render the window to that file once it has drawn. `G512_CONTROL_SIZE`
+    /// (e.g. `360x800`) sizes the window first.
     fn debug_screenshot(&self) {
         let Ok(path) = std::env::var("G512_CONTROL_SCREENSHOT") else { return };
         if let Ok(view) = std::env::var("G512_CONTROL_VIEW") {
             self.view_stack.set_visible_child_name(&view);
+        }
+        if let Some((w, h)) = std::env::var("G512_CONTROL_SIZE").ok().and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse().ok()?, h.parse().ok()?))
+        }) {
+            self.window.set_default_size(w, h);
         }
         let window = self.window.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
@@ -675,6 +737,24 @@ impl Ui {
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
                 self.button_section.show(mouse.as_deref());
+                if let Some(m) = mouse.as_deref() {
+                    let kb = match &keyboard {
+                        DeviceState::Connected { state, per_key, lights_on, .. } => {
+                            let on = lights_on.unwrap_or(true);
+                            Some((on, art::shown(on, per_key.game_active, state, &per_key.custom, &per_key.gaming)))
+                        }
+                        _ => None,
+                    };
+                    let lights_on = kb.as_ref().is_none_or(|(on, _)| *on);
+                    let shown = art::mouse_shown(lights_on, m.matching, &m.lighting, kb.map(|(_, s)| s));
+                    let actions = m
+                        .buttons
+                        .iter()
+                        .find(|(number, _)| *number == m.active_profile)
+                        .filter(|_| m.state == "connected")
+                        .map(|(_, actions)| actions.as_slice());
+                    self.mouse_art.show(&shown, actions);
+                }
                 match mouse.as_deref().map(|m| m.state.as_str()) {
                     Some("connected") | None => self.mouse_stack.set_visible_child_name("controls"),
                     Some("permission-denied") => self.show_problem(Device::Mouse, DeviceProblem::PermissionDenied),

@@ -32,7 +32,7 @@
 ### D1. Views: `AdwViewStack`, with the switcher in the header and a bottom bar when narrow
 
 - **Structure:**
-  - two `AdwViewStackPage`s ("Keyboard" with `input-keyboard-symbolic`, "Mouse" with `input-mouse-symbolic`), each holding an `AdwPreferencesPage`;
+  - two `AdwViewStackPage`s ("Keyboard" with `input-keyboard-symbolic`, "Mouse" with `input-mouse-symbolic`), each holding a scrolled column of preference groups. The column is clamped to the board's width (694 px for the keyboard, 760 px for the mouse, so the callouts fit beside the drawing) instead of `AdwPreferencesPage`'s fixed 600 px clamp;
   - an `AdwViewSwitcher` as the header bar's title widget;
   - an `AdwViewSwitcherBar` in the toolbar's bottom bar;
   - an `AdwBreakpoint` (`max-width: 550sp`) that hides the header switcher and reveals the bar.
@@ -98,7 +98,7 @@
 
 ### D7. Callouts
 
-- **The legend:** the 11 callouts are `gtk::Button`s laid out in a two-column `GtkGrid` (compact) or `GtkFlowBox` (narrow). Each shows the number, the button name and the action. Each is at least 44 px tall, which meets the 24 px target, styled as on the `Button callout` board.
+- **The legend:** the 11 callouts are `gtk::Button`s in a two-column `GtkGrid`: down the columns (1–6, 7–11) beside the drawing (compact), or across in pairs below it (narrow). Each shows the number, the button name and the action. Each is at least 44 px tall, which meets the 24 px target, styled as on the `Button callout` board.
 - **Change dialog:** they open the `ChangeDialog` from `button_section.rs`, moved to its own module so the rows and the callouts share it.
 - **Left Click:** insensitive, labelled "Left click · fixed", with a dashed border.
 - **Badges:** drawn by the illustration (D4) in `color.accent-strong` (#1D8092, white numbers 4.61:1).

@@ -43,6 +43,40 @@ pub fn shown<'a>(lights_on: bool, gaming_shown: bool, state: &'a LightingState, 
     }
 }
 
+/// The key whose colour a matching mouse takes from a key map (W), as in
+/// `g512d/src/mouse.rs`.
+const MOUSE_MAP_KEY: u8 = 0x1a;
+
+/// What the mouse shows, derived as g512d does: dark while the keyboard's
+/// lights are off; its own setting while not matching; otherwise the
+/// keyboard's, translated to what the mouse has (Wave as Cycle, Ripple as
+/// Static, a key map as Static in its W key's colour). `keyboard` is `None`
+/// while the keyboard is missing, and the mouse keeps its own setting.
+pub fn mouse_shown<'a>(
+    lights_on: bool,
+    matching: bool,
+    own: &'a LightingState,
+    keyboard: Option<Shown<'a>>,
+) -> Shown<'a> {
+    if !lights_on {
+        return Shown::Dark;
+    }
+    match keyboard {
+        Some(kb) if matching => match kb {
+            Shown::Map(keys) => keys
+                .iter()
+                .find(|k| k.0 == MOUSE_MAP_KEY)
+                .map_or(Shown::Dark, |&(_, r, g, b)| Shown::Colour { effect: "Static", colour: (r, g, b) }),
+            Shown::Rainbow { .. } => Shown::Rainbow { effect: "Cycle" },
+            Shown::Colour { effect: "Ripple", colour } => Shown::Colour { effect: "Static", colour },
+            other => other,
+        },
+        _ => shown(true, false, own, &NO_KEYS, &NO_KEYS),
+    }
+}
+
+static NO_KEYS: Keys = Vec::new();
+
 /// Each key's fill, in `KEYS` order: `Some((colour, level))` for a lit key
 /// (`level` 0 to 1 from the animation; 1 when still), `None` for an
 /// outline. `level_at` gives the animation's level for a key; Fn has no
@@ -182,6 +216,32 @@ mod tests {
         let colours = key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.5);
         assert!(colours.iter().flatten().all(|&(_, level)| level == 0.5));
         assert_eq!(lit(&key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.0)), 0, "a level of 0 is unlit");
+    }
+
+    #[test]
+    fn mouse_follows_the_service_rules() {
+        let own = state("Breathe");
+        let kb = state("Ripple");
+        let kb_shown = || Some(shown(true, false, &kb, &EMPTY, &EMPTY));
+        assert_eq!(mouse_shown(true, false, &own, kb_shown()), Shown::Colour { effect: "Breathe", colour: own.color });
+        assert_eq!(mouse_shown(true, true, &own, kb_shown()), Shown::Colour { effect: "Static", colour: kb.color });
+        assert_eq!(mouse_shown(false, false, &own, kb_shown()), Shown::Dark, "keyboard lights off");
+        assert_eq!(
+            mouse_shown(true, true, &own, None),
+            Shown::Colour { effect: "Breathe", colour: own.color },
+            "no keyboard"
+        );
+        let wave = state("Wave");
+        assert_eq!(
+            mouse_shown(true, true, &own, Some(shown(true, false, &wave, &EMPTY, &EMPTY))),
+            Shown::Rainbow { effect: "Cycle" }
+        );
+        let map: Keys = vec![(0x04, 1, 2, 3), (0x1a, 0xff, 0x20, 0x00)];
+        let custom = state(CUSTOM);
+        let from_map = mouse_shown(true, true, &own, Some(shown(true, false, &custom, &map, &EMPTY)));
+        assert_eq!(from_map, Shown::Colour { effect: "Static", colour: (0xff, 0x20, 0x00) }, "the W key's colour");
+        let no_w: Keys = vec![(0x04, 1, 2, 3)];
+        assert_eq!(mouse_shown(true, true, &own, Some(shown(true, false, &custom, &no_w, &EMPTY))), Shown::Dark);
     }
 
     #[test]
