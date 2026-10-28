@@ -9,6 +9,12 @@ use zbus::{
 };
 
 pub const BUS_NAME: &str = "io.github.g512control.Lighting1";
+
+/// The service's bus name: `BUS_NAME`, or `G512_CONTROL_BUS_NAME` when set,
+/// so the app can be tested against a stand-in without stopping g512d.
+pub fn bus_name() -> String {
+    std::env::var("G512_CONTROL_BUS_NAME").unwrap_or_else(|_| BUS_NAME.to_string())
+}
 pub const OBJECT_PATH: &str = "/io/github/g512control/Lighting1";
 pub const INTERFACE: &str = "io.github.g512control.Lighting1";
 

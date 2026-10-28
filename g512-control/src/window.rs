@@ -17,19 +17,108 @@ use crate::{
     editor::{Editor, MapName},
     mouse_section::MouseSection,
     profile_section::ProfileSection,
-    service::{self, BUS_NAME, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
+    service::{self, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
     throttle::Throttle,
     udev,
 };
 
 pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 
+/// What covers the whole window: the service can't be reached.
 enum Status {
     ServiceMissing,
+    NoSessionBus(String),
+}
+
+/// A device that isn't usable, shown on its own view's status page.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeviceProblem {
     Disconnected,
     PermissionDenied,
     Unsupported,
-    NoSessionBus(String),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Device {
+    Keyboard,
+    Mouse,
+}
+
+/// A status page with a selectable detail line (for commands).
+struct StatusView {
+    page: adw::StatusPage,
+    detail: gtk::Label,
+}
+
+impl StatusView {
+    fn new(retry: Option<&gtk::Button>) -> Self {
+        let detail = gtk::Label::builder()
+            .selectable(true)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::Char)
+            .css_classes(["monospace", "card"])
+            .build();
+        detail.set_margin_start(12);
+        detail.set_margin_end(12);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
+        content.append(&detail);
+        if let Some(retry) = retry {
+            content.append(retry);
+        }
+        StatusView { page: adw::StatusPage::builder().child(&content).build(), detail }
+    }
+
+    fn show(&self, icon: &str, title: &str, description: &str, detail: &str) {
+        self.page.set_icon_name(Some(icon));
+        self.page.set_title(title);
+        self.page.set_description(Some(description));
+        self.detail.set_label(detail);
+        self.detail.set_visible(!detail.is_empty());
+    }
+}
+
+/// Icon, title, description and detail for a device that isn't usable.
+fn problem_text(device: Device, problem: DeviceProblem) -> (&'static str, &'static str, &'static str, String) {
+    let (icon, name) = match device {
+        Device::Keyboard => ("input-keyboard-symbolic", "keyboard"),
+        Device::Mouse => ("input-mouse-symbolic", "mouse"),
+    };
+    match (device, problem) {
+        (Device::Keyboard, DeviceProblem::Disconnected) => (
+            icon,
+            "Keyboard Not Connected",
+            "Plug in the Logitech G512. Your saved lighting is applied when it connects. The Mouse view keeps working meanwhile.",
+            String::new(),
+        ),
+        (Device::Mouse, DeviceProblem::Disconnected) => (
+            icon,
+            "Mouse Not Connected",
+            "Plug in the G502 HERO. Its lighting is applied when it connects, and its profiles and buttons are read from the mouse. The Keyboard view keeps working meanwhile.",
+            String::new(),
+        ),
+        (_, DeviceProblem::PermissionDenied) => (
+            "dialog-password-symbolic",
+            if device == Device::Keyboard { "No Access to the Keyboard" } else { "No Access to the Mouse" },
+            if name == "keyboard" {
+                "Install the udev rule once. It covers the keyboard and the mouse. Then unplug and replug the keyboard."
+            } else {
+                "Install the udev rule once. It covers the keyboard and the mouse. Then unplug and replug the mouse."
+            },
+            udev::install_command(udev::RULES),
+        ),
+        (Device::Keyboard, DeviceProblem::Unsupported) => (
+            "dialog-warning-symbolic",
+            "Keyboard Not Supported",
+            "This keyboard's firmware does not offer the lighting effects this app uses.",
+            String::new(),
+        ),
+        (Device::Mouse, DeviceProblem::Unsupported) => (
+            "dialog-warning-symbolic",
+            "Mouse Not Supported",
+            "This mouse's firmware does not offer the lighting this app uses.",
+            String::new(),
+        ),
+    }
 }
 
 struct Bus {
@@ -40,10 +129,24 @@ struct Bus {
 pub struct Ui {
     window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
+    /// The whole window: "status" (service unreachable) or "main".
     stack: gtk::Stack,
-    status: adw::StatusPage,
-    status_detail: gtk::Label,
+    status: StatusView,
     retry: gtk::Button,
+    view_stack: adw::ViewStack,
+    mouse_view: adw::ViewStackPage,
+    view_switcher: adw::ViewSwitcher,
+    switcher_bar: adw::ViewSwitcherBar,
+    window_title: adw::WindowTitle,
+    /// Each view: "status" (its device isn't usable) or "controls".
+    keyboard_stack: gtk::Stack,
+    keyboard_status: StatusView,
+    mouse_stack: gtk::Stack,
+    mouse_status: StatusView,
+    /// Set while the narrow-window breakpoint applies.
+    narrow: Cell<bool>,
+    /// The service reports a mouse (it supports one).
+    has_mouse: Cell<bool>,
     device_row: adw::ActionRow,
     lights_row: adw::SwitchRow,
     effect_row: adw::ComboRow,
@@ -72,6 +175,7 @@ pub struct Ui {
     keys_throttle: RefCell<Throttle<(MapName, Keys)>>,
     keys_flush_scheduled: Cell<bool>,
     bus: RefCell<Option<Rc<Bus>>>,
+    breakpoint: RefCell<Option<adw::Breakpoint>>,
 }
 
 pub fn present(app: &adw::Application) {
@@ -120,23 +224,12 @@ impl Ui {
             .default_height(640)
             .build();
 
-        let status_detail = gtk::Label::builder()
-            .selectable(true)
-            .wrap(true)
-            .wrap_mode(gtk::pango::WrapMode::Char)
-            .css_classes(["monospace", "card"])
-            .build();
-        status_detail.set_margin_start(12);
-        status_detail.set_margin_end(12);
         let retry = gtk::Button::builder()
             .label("Try Again")
             .halign(gtk::Align::Center)
             .css_classes(["pill", "suggested-action"])
             .build();
-        let status_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        status_box.append(&status_detail);
-        status_box.append(&retry);
-        let status = adw::StatusPage::builder().child(&status_box).build();
+        let status = StatusView::new(Some(&retry));
 
         let device_row = adw::ActionRow::new();
         device_row.add_prefix(&gtk::Image::from_icon_name("input-keyboard-symbolic"));
@@ -169,7 +262,7 @@ impl Ui {
             .build();
         keymaps_button.update_property(&[gtk::accessible::Property::Label("Open Key Maps")]);
         let keymaps_row = adw::ActionRow::builder()
-            .title("Key Maps")
+            .title("Edit Key Maps…")
             .subtitle("Colour single keys for Custom and the Gaming layout")
             .activatable_widget(&keymaps_button)
             .build();
@@ -191,27 +284,51 @@ impl Ui {
         let games_group = adw::PreferencesGroup::builder().title("Games").build();
         games_group.add(&game_row);
 
-        let page = adw::PreferencesPage::new();
-        page.add(&device_group);
-        page.add(&lighting_group);
-        page.add(&games_group);
+        let keyboard_page = adw::PreferencesPage::new();
+        keyboard_page.add(&device_group);
+        keyboard_page.add(&lighting_group);
+        keyboard_page.add(&games_group);
+        let mouse_page = adw::PreferencesPage::new();
         let mouse_section = MouseSection::new();
-        page.add(&mouse_section.group);
+        mouse_page.add(&mouse_section.group);
         let profile_section = ProfileSection::new();
-        page.add(&profile_section.group);
+        mouse_page.add(&profile_section.group);
         let button_section = ButtonSection::new();
-        page.add(&button_section.group);
+        mouse_page.add(&button_section.group);
+
+        // Each view swaps its controls for a status page while its device
+        // isn't usable; the other view keeps working.
+        let keyboard_status = StatusView::new(None);
+        let keyboard_stack = gtk::Stack::new();
+        keyboard_stack.add_named(&keyboard_status.page, Some("status"));
+        keyboard_stack.add_named(&keyboard_page, Some("controls"));
+        let mouse_status = StatusView::new(None);
+        let mouse_stack = gtk::Stack::new();
+        mouse_stack.add_named(&mouse_status.page, Some("status"));
+        mouse_stack.add_named(&mouse_page, Some("controls"));
+
+        let view_stack = adw::ViewStack::new();
+        view_stack.add_titled_with_icon(&keyboard_stack, Some("keyboard"), "Keyboard", "input-keyboard-symbolic");
+        let mouse_view = view_stack.add_titled_with_icon(&mouse_stack, Some("mouse"), "Mouse", "input-mouse-symbolic");
+        let view_switcher =
+            adw::ViewSwitcher::builder().stack(&view_stack).policy(adw::ViewSwitcherPolicy::Wide).build();
+        let switcher_bar = adw::ViewSwitcherBar::builder().stack(&view_stack).build();
+        let window_title = adw::WindowTitle::new("G512 Control", "");
+        let titles = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        titles.append(&view_switcher);
+        titles.append(&window_title);
 
         let stack = gtk::Stack::new();
-        stack.add_named(&status, Some("status"));
-        stack.add_named(&page, Some("main"));
+        stack.add_named(&status.page, Some("status"));
+        stack.add_named(&view_stack, Some("main"));
 
         let banner = adw::Banner::new("Gaming layout active while a game runs");
         banner.set_visible(false);
         let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.add_top_bar(&adw::HeaderBar::builder().title_widget(&titles).build());
         toolbar.add_top_bar(&banner);
         toolbar.set_content(Some(&stack));
+        toolbar.add_bottom_bar(&switcher_bar);
         let main_page = adw::NavigationPage::builder().title("G512 Control").tag("main").child(&toolbar).build();
 
         let editor = Editor::new();
@@ -222,13 +339,28 @@ impl Ui {
         toasts.set_child(Some(&nav));
         window.set_content(Some(&toasts));
 
+        // Narrow windows move the switcher to a bar at the bottom.
+        let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 550sp").expect("valid condition"));
+        window.add_breakpoint(narrow.clone());
+        let narrow_breakpoint = narrow;
+
         Ui {
             window,
             toasts,
             stack,
             status,
-            status_detail,
             retry,
+            view_stack,
+            mouse_view,
+            view_switcher,
+            switcher_bar,
+            window_title,
+            keyboard_stack,
+            keyboard_status,
+            mouse_stack,
+            mouse_status,
+            narrow: Cell::new(false),
+            has_mouse: Cell::new(false),
             device_row,
             lights_row,
             effect_row,
@@ -255,6 +387,29 @@ impl Ui {
             keys_throttle: RefCell::new(Throttle::new(UPDATE_INTERVAL)),
             keys_flush_scheduled: Cell::new(false),
             bus: RefCell::new(None),
+            breakpoint: RefCell::new(None),
+        }
+        .with_breakpoint(narrow_breakpoint)
+    }
+
+    /// Follow the narrow-window breakpoint to place the switcher.
+    fn with_breakpoint(self, breakpoint: adw::Breakpoint) -> Self {
+        self.breakpoint.replace(Some(breakpoint));
+        self
+    }
+
+    /// Show the switcher in the header, in the bottom bar when narrow, or not
+    /// at all on a service without a mouse.
+    fn update_switchers(&self) {
+        let switching = self.has_mouse.get();
+        let narrow = self.narrow.get();
+        self.view_switcher.set_visible(switching && !narrow);
+        self.switcher_bar.set_reveal(switching && narrow);
+        self.switcher_bar.set_visible(switching && narrow);
+        self.window_title.set_visible(!switching || narrow);
+        self.mouse_view.set_visible(switching);
+        if !switching {
+            self.view_stack.set_visible_child_name("keyboard");
         }
     }
 
@@ -386,6 +541,23 @@ impl Ui {
                 }
             },
         );
+        if let Some(bp) = self.breakpoint.borrow().as_ref() {
+            for narrow in [true, false] {
+                let w = weak.clone();
+                let handler = move |_: &adw::Breakpoint| {
+                    if let Some(ui) = w.upgrade() {
+                        ui.narrow.set(narrow);
+                        ui.update_switchers();
+                    }
+                };
+                if narrow {
+                    bp.connect_apply(handler);
+                } else {
+                    bp.connect_unapply(handler);
+                }
+            }
+        }
+        self.update_switchers();
         let w = weak;
         self.retry.connect_clicked(move |_| {
             if let Some(ui) = w.upgrade() {
@@ -400,8 +572,13 @@ impl Ui {
             Err(e) => return self.show_status(Status::NoSessionBus(e.to_string())),
         };
         let bus = async {
-            let lighting = LightingProxy::builder(&conn).cache_properties(zbus::proxy::CacheProperties::No).build().await?;
-            let props = PropertiesProxy::builder(&conn).destination(BUS_NAME)?.path(OBJECT_PATH)?.build().await?;
+            let name = service::bus_name();
+            let lighting = LightingProxy::builder(&conn)
+                .destination(name.clone())?
+                .cache_properties(zbus::proxy::CacheProperties::No)
+                .build()
+                .await?;
+            let props = PropertiesProxy::builder(&conn).destination(name)?.path(OBJECT_PATH)?.build().await?;
             zbus::Result::Ok(Bus { lighting, props })
         };
         let bus = match bus.await {
@@ -413,7 +590,7 @@ impl Ui {
 
         // The service restarting, or any property change, re-reads everything.
         if let Ok(dbus) = DBusProxy::new(&conn).await
-            && let Ok(mut owners) = dbus.receive_name_owner_changed_with_args(&[(0, BUS_NAME)]).await
+            && let Ok(mut owners) = dbus.receive_name_owner_changed_with_args(&[(0, service::bus_name().as_str())]).await
         {
             let ui = Rc::downgrade(&self);
             glib::spawn_future_local(async move {
@@ -441,74 +618,68 @@ impl Ui {
                 self.show_status(Status::ServiceMissing);
             }
             Ok(Snapshot { keyboard, mouse }) => {
+                self.stack.set_visible_child_name("main");
+                self.has_mouse.set(mouse.is_some());
+                self.update_switchers();
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
                 self.button_section.show(mouse.as_deref());
+                match mouse.as_deref().map(|m| m.state.as_str()) {
+                    Some("connected") | None => self.mouse_stack.set_visible_child_name("controls"),
+                    Some("permission-denied") => self.show_problem(Device::Mouse, DeviceProblem::PermissionDenied),
+                    Some("unsupported") => self.show_problem(Device::Mouse, DeviceProblem::Unsupported),
+                    Some(_) => self.show_problem(Device::Mouse, DeviceProblem::Disconnected),
+                }
                 match keyboard {
                     DeviceState::Connected { name, firmware, effects, state, per_key, lights_on } => {
                         self.show_lights(lights_on);
                         self.show_per_key(&effects, &per_key);
                         self.show_controls(&name, &firmware, effects, &state)
                     }
-                    DeviceState::Disconnected => self.show_status(Status::Disconnected),
-                    DeviceState::PermissionDenied => self.show_status(Status::PermissionDenied),
-                    DeviceState::Unsupported => self.show_status(Status::Unsupported),
+                    DeviceState::Disconnected => self.show_problem(Device::Keyboard, DeviceProblem::Disconnected),
+                    DeviceState::PermissionDenied => self.show_problem(Device::Keyboard, DeviceProblem::PermissionDenied),
+                    DeviceState::Unsupported => self.show_problem(Device::Keyboard, DeviceProblem::Unsupported),
                 }
             }
         }
     }
 
+    /// Cover the whole window: the service can't be reached.
     fn show_status(&self, status: Status) {
-        let (icon, title, description, detail, retry) = match status {
+        let (icon, title, description, detail) = match status {
             Status::ServiceMissing => (
                 "system-run-symbolic",
                 "Lighting Service Not Running",
-                "The g512d service controls the keyboard. Start it, then try again.",
+                "The g512d service controls the keyboard and the mouse. Start it, then try again.",
                 "systemctl --user start g512d".to_string(),
-                true,
-            ),
-            Status::Disconnected => (
-                "input-keyboard-symbolic",
-                "Keyboard Not Connected",
-                "Plug in the Logitech G512. Your saved lighting is applied when it connects.",
-                String::new(),
-                false,
-            ),
-            Status::PermissionDenied => (
-                "dialog-password-symbolic",
-                "No Access to the Keyboard",
-                "Install the udev rule once, then unplug and replug the keyboard.",
-                udev::install_command(udev::RULES),
-                false,
-            ),
-            Status::Unsupported => (
-                "dialog-warning-symbolic",
-                "Keyboard Not Supported",
-                "This keyboard's firmware does not offer the lighting effects this app uses.",
-                String::new(),
-                false,
             ),
             Status::NoSessionBus(e) => (
                 "dialog-error-symbolic",
                 "Cannot Reach the Session Bus",
                 "The app talks to the lighting service over D-Bus.",
                 e,
-                true,
             ),
         };
-        self.status.set_icon_name(Some(icon));
-        self.status.set_title(title);
-        self.status.set_description(Some(description));
-        self.status_detail.set_label(&detail);
-        self.status_detail.set_visible(!detail.is_empty());
-        self.retry.set_visible(retry);
+        self.status.show(icon, title, description, &detail);
+        self.retry.set_visible(true);
         self.stack.set_visible_child_name("status");
+    }
+
+    /// Replace one view's controls with a status page for its device.
+    fn show_problem(&self, device: Device, problem: DeviceProblem) {
+        let (icon, title, description, detail) = problem_text(device, problem);
+        let (view, stack) = match device {
+            Device::Keyboard => (&self.keyboard_status, &self.keyboard_stack),
+            Device::Mouse => (&self.mouse_status, &self.mouse_stack),
+        };
+        view.show(icon, title, description, &detail);
+        stack.set_visible_child_name("status");
     }
 
     fn show_controls(&self, name: &str, firmware: &str, effects: Vec<EffectInfo>, state: &LightingState) {
         self.device_row.set_title(name);
         self.device_row.set_subtitle(&format!("Firmware {firmware}"));
-        self.stack.set_visible_child_name("main");
+        self.keyboard_stack.set_visible_child_name("controls");
         // Mid-drag the controls lead; the timer re-syncs once the user stops.
         if self.throttle.borrow().busy(Instant::now()) {
             return;

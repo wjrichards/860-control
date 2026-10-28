@@ -1,13 +1,20 @@
-"""A stand-in for g512d on a private session bus, for testing the tile.
+"""A stand-in for g512d, for testing the tile and the app.
 
-It owns io.github.g512control.Lighting1 with the members the tile uses,
+It owns io.github.g512control.Lighting1 (on a private bus) with the members the tile and the app use,
 logs every call to stdout ("<seconds> call <Method> <args>"), and takes property changes from the test through
 a second interface, io.github.g512control.Test:
 
     Set(s name, v value)   change a property and emit PropertiesChanged
     Quit()
 
-Run with python3 -I. Never use this on the real session bus.
+Options:
+    --yes-this-is-a-private-bus   required to own the real name
+    --name NAME                   own NAME instead; safe on the real session bus (the app
+                                  follows it with G512_CONTROL_BUS_NAME=NAME)
+    --keyboard-missing            report the keyboard as disconnected
+    --no-mouse                    an older service: no mouse members at all
+
+Run with python3 -I. Never own the real name on the real session bus.
 """
 import sys
 import time
@@ -32,6 +39,9 @@ XML = """
     <property name="GameSwitch" type="b" access="read"/>
     <property name="GameActive" type="b" access="read"/>
     <property name="LightsOn" type="b" access="read"/>
+    <property name="CustomKeys" type="a(yyyy)" access="read"/>
+    <property name="GamingKeys" type="a(yyyy)" access="read"/>
+    MOUSE_PROPERTIES
     <method name="SetState">
       <arg type="s" direction="in"/><arg type="(yyy)" direction="in"/>
       <arg type="y" direction="in"/><arg type="y" direction="in"/>
@@ -50,7 +60,16 @@ XML = """
 SIGNATURES = {
     "DeviceState": "s", "DeviceName": "s", "Firmware": "s", "Effects": "a(sbbyy)",
     "State": "(s(yyy)yy)", "Pending": "b", "GameSwitch": "b", "GameActive": "b", "LightsOn": "b",
+    "CustomKeys": "a(yyyy)", "GamingKeys": "a(yyyy)",
 }
+MOUSE_SIGNATURES = {
+    "MouseState": "s", "MouseName": "s", "MouseEffects": "a(sbbyy)", "MouseMatch": "b",
+    "MouseLighting": "(s(yyy)yy)", "MouseProfiles": "a(yyyaq)", "MouseActiveProfile": "y",
+    "MouseDpiRange": "(qqq)", "MouseButtons": "a(ya(sqy))",
+}
+PROFILE_BUTTONS = [("mouse", 1, 0), ("mouse", 2, 0), ("mouse", 4, 0), ("mouse", 8, 0), ("mouse", 16, 0),
+                   ("special", 7, 0), ("special", 4, 0), ("special", 3, 0), ("special", 10, 0),
+                   ("special", 2, 0), ("special", 1, 0)]
 
 props = {
     "DeviceState": "connected",
@@ -66,6 +85,20 @@ props = {
     "GameSwitch": False,
     "GameActive": False,
     "LightsOn": True,
+    "CustomKeys": [(0x1a, 0x26, 0xA2, 0x69), (0x04, 0x26, 0xA2, 0x69), (0x16, 0x26, 0xA2, 0x69), (0x07, 0x26, 0xA2, 0x69)],
+    "GamingKeys": [],
+}
+mouse_props = {
+    "MouseState": "connected",
+    "MouseName": "G502 HERO Gaming Mouse",
+    "MouseEffects": [("Off", False, False, 0, 0), ("Static", True, False, 0, 0),
+                     ("Breathe", True, True, 1, 100), ("Cycle", False, True, 1, 100)],
+    "MouseMatch": True,
+    "MouseLighting": ("Static", (0x26, 0xA2, 0x69), 50, 100),
+    "MouseProfiles": [(n, 1, 0, [3200]) for n in range(1, 6)],
+    "MouseActiveProfile": 4,
+    "MouseDpiRange": (100, 25600, 50),
+    "MouseButtons": [(n, PROFILE_BUTTONS) for n in range(1, 6)],
 }
 
 loop = GLib.MainLoop()
@@ -122,14 +155,22 @@ def on_get(_conn, _sender, _path, _iface, name):
 def on_bus(c, _name):
     global conn
     conn = c
-    for info in Gio.DBusNodeInfo.new_for_xml(XML).interfaces:
+    mouse = "" if "--no-mouse" in sys.argv else "\n".join(
+        f'<property name="{n}" type="{t}" access="read"/>' for n, t in MOUSE_SIGNATURES.items())
+    for info in Gio.DBusNodeInfo.new_for_xml(XML.replace("MOUSE_PROPERTIES", mouse)).interfaces:
         c.register_object(PATH, info, on_call, on_get, None)
 
 
 def main():
-    if "--yes-this-is-a-private-bus" not in sys.argv:
-        sys.exit("refusing to start without --yes-this-is-a-private-bus")
-    Gio.bus_own_name(Gio.BusType.SESSION, NAME, Gio.BusNameOwnerFlags.NONE, on_bus,
+    name = sys.argv[sys.argv.index("--name") + 1] if "--name" in sys.argv else NAME
+    if name == NAME and "--yes-this-is-a-private-bus" not in sys.argv:
+        sys.exit("refusing to own the real name without --yes-this-is-a-private-bus")
+    if "--keyboard-missing" in sys.argv:
+        props["DeviceState"] = "disconnected"
+    if "--no-mouse" not in sys.argv:
+        SIGNATURES.update(MOUSE_SIGNATURES)
+        props.update(mouse_props)
+    Gio.bus_own_name(Gio.BusType.SESSION, name, Gio.BusNameOwnerFlags.NONE, on_bus,
                      lambda *_: log("ready"), lambda *_: (log("name lost"), loop.quit()))
     loop.run()
 

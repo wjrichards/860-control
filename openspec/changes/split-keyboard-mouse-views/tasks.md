@@ -14,14 +14,14 @@
 
 ## 2. Views
 
-- [ ] 2.1 Replace the single page with an `AdwViewStack`:
+- [x] 2.1 Replace the single page with an `AdwViewStack`:
   - Keyboard and Mouse pages with their icons;
   - the header `AdwViewSwitcher`;
   - an `AdwViewSwitcherBar`;
   - an `AdwBreakpoint` at 550sp (D1).
 
   Move the keyboard groups and `MouseSection`/`ProfileSection`/`ButtonSection` into their pages, and rename the Key Maps row to "Edit Key Maps…". Verify over AT-SPI that both pages exist with their names and that each group sits on the right page.
-- [ ] 2.2 Give each page an inner stack with an `AdwStatusPage` for disconnected, permission-denied and unsupported; keep the window-level status page for the service missing (D2). Hide the Mouse page and switchers when the service reports no mouse. Verify on a private bus with `tests/fake_service.py` (extended with a keyboard-missing mode) that:
+- [x] 2.2 Give each page an inner stack with an `AdwStatusPage` for disconnected, permission-denied and unsupported; keep the window-level status page for the service missing (D2). Hide the Mouse page and switchers when the service reports no mouse. Verify on a private bus with `tests/fake_service.py` (extended with a keyboard-missing mode) that:
   - with the keyboard missing, the Keyboard page shows its status page and the Mouse page shows its controls;
   - with no mouse properties, no switcher is shown.
 
