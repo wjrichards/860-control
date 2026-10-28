@@ -26,6 +26,7 @@ pub trait Lighting {
     fn set_mouse_lighting(&self, effect: &str, color: (u8, u8, u8), speed: u8, brightness: u8) -> zbus::Result<bool>;
     fn set_mouse_active_profile(&self, profile: u8) -> zbus::Result<()>;
     fn set_mouse_profile(&self, profile: u8, report_rate_ms: u8, default_index: u8, dpis: &[u16]) -> zbus::Result<()>;
+    fn set_mouse_button(&self, profile: u8, button: u8, kind: &str, value: u16, modifiers: u8) -> zbus::Result<()>;
 }
 
 /// The Custom effect's name on the bus.
@@ -78,6 +79,18 @@ pub struct Mouse {
     pub active_profile: u8,
     /// (min, max, step); zeros when unknown.
     pub dpi_range: (u16, u16, u16),
+    /// Each profile's buttons, by profile number; empty on a service
+    /// without them.
+    pub buttons: Vec<(u8, Vec<ButtonAction>)>,
+}
+
+/// What one mouse button does, as the service reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ButtonAction {
+    /// `mouse`, `key`, `media`, `special`, `disabled` or `other`.
+    pub kind: String,
+    pub value: u16,
+    pub modifiers: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,6 +157,17 @@ pub async fn snapshot(props: &PropertiesProxy<'_>) -> zbus::Result<DeviceState> 
                         .collect(),
                     active_profile: optional(&all, "MouseActiveProfile")?.unwrap_or(0),
                     dpi_range: optional(&all, "MouseDpiRange")?.unwrap_or((0, 0, 0)),
+                    buttons: optional::<Vec<(u8, Vec<(String, u16, u8)>)>>(&all, "MouseButtons")?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(number, entries)| {
+                            let actions = entries
+                                .into_iter()
+                                .map(|(kind, value, modifiers)| ButtonAction { kind, value, modifiers })
+                                .collect();
+                            (number, actions)
+                        })
+                        .collect(),
                 })),
                 None => None,
             },

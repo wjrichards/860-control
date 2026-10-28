@@ -23,6 +23,9 @@ const ATTEMPTS: u32 = 3;
 /// At login the session's `uaccess` ACL can land just after the service
 /// starts, with no uevent to say so: keep trying for 15 s.
 const LOGIN_ATTEMPTS: u32 = 30;
+/// How often the mouse's active profile is read; its own button switches
+/// profiles without telling anyone.
+const PROFILE_WATCH: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Uevent {
@@ -246,6 +249,21 @@ fn retry_while_denied(attempts: u32, mut connect: impl FnMut() -> DeviceStatus) 
         }
     }
     (attempts, status)
+}
+
+/// Follow the mouse's active profile, which its profile button changes on
+/// the mouse itself, and publish a switch.
+pub fn spawn_profile_watch(ctl: Shared, conn: zbus::blocking::Connection) -> io::Result<()> {
+    thread::Builder::new().name("profile-watch".into()).spawn(move || {
+        loop {
+            thread::sleep(PROFILE_WATCH);
+            let changed = ctl.lock().unwrap_or_else(|e| e.into_inner()).poll_mouse_profile();
+            if changed {
+                notify(&conn);
+            }
+        }
+    })?;
+    Ok(())
 }
 
 pub fn spawn_resume(ctl: Shared, conn: zbus::blocking::Connection) -> zbus::Result<()> {

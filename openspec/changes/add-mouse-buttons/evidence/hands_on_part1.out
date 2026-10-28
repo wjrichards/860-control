@@ -1,0 +1,8 @@
+--- calls (UTC):
+  18:18:15 SetState  "Ripple" 38 162 105 60 60
+  18:18:16 SetState  "Ripple" 38 162 105 60 50
+  18:20:38 SetState  "Ripple" 38 162 105 60 60
+  18:25:10 SetMouseButton  4 5 "special" 5 0
+  18:28:48 SetMouseButton  4 8 "key" 6 1
+--- profile 4 now:
+  4 11 "mouse" 1 0 "mouse" 2 0 "mouse" 4 0 "mouse" 8 0 "mouse" 16 0 "special" 

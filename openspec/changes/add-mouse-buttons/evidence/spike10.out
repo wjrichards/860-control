@@ -1,0 +1,129 @@
+slots: {'0x0c': 'OnboardProfiles', '0x0a': 'AdjustableDpi'}
+14:09:52 reply (sw 0xa): OnboardProfiles fn/event 4: 11 ff 0c 4a 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:09:54 reply (sw 0xb): OnboardProfiles fn/event 4: 11 ff 0c 4b 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:09:56 reply (sw 0xc): OnboardProfiles fn/event 4: 11 ff 0c 4c 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:09:58 reply (sw 0xd): OnboardProfiles fn/event 4: 11 ff 0c 4d 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:00 reply (sw 0xe): OnboardProfiles fn/event 4: 11 ff 0c 4e 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:02 reply (sw 0xf): OnboardProfiles fn/event 4: 11 ff 0c 4f 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:04 reply (sw 0x1): OnboardProfiles fn/event 4: 11 ff 0c 41 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:06 reply (sw 0x2): OnboardProfiles fn/event 4: 11 ff 0c 42 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:08 reply (sw 0x3): OnboardProfiles fn/event 4: 11 ff 0c 43 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:10 reply (sw 0x4): OnboardProfiles fn/event 4: 11 ff 0c 44 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:12 reply (sw 0x5): OnboardProfiles fn/event 4: 11 ff 0c 45 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:14 reply (sw 0x6): OnboardProfiles fn/event 4: 11 ff 0c 46 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:16 reply (sw 0x7): OnboardProfiles fn/event 4: 11 ff 0c 47 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:18 reply (sw 0x8): OnboardProfiles fn/event 4: 11 ff 0c 48 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:20 reply (sw 0x9): OnboardProfiles fn/event 4: 11 ff 0c 49 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:22 reply (sw 0xa): OnboardProfiles fn/event 4: 11 ff 0c 4a 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:23 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:24 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:24 reply (sw 0xb): OnboardProfiles fn/event 4: 11 ff 0c 4b 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:24 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c 01 01 00 b0 04 60 09 80 0c 00 19 00 00 ff ff ff
+14:10:24 reply (sw 0xd): OnboardProfiles fn/event 5: 11 ff 0c 5d ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:24 reply (sw 0xe): OnboardProfiles fn/event 5: 11 ff 0c 5e 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:24 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f 80 01 00 10 90 07 00 00 90 04 00 00 90 03 00 00
+14:10:24 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 90 0a 00 00 90 02 00 00 90 01 00 00 ff ff ff ff
+14:10:24 reply (sw 0x2): OnboardProfiles fn/event 5: 11 ff 0c 52 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:24 reply (sw 0x3): OnboardProfiles fn/event 5: 11 ff 0c 53 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:24 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 80 01 00 10 90 07 00 00 90 04 00 00 90 03 00 00
+14:10:24 reply (sw 0x5): OnboardProfiles fn/event 5: 11 ff 0c 55 90 0a 00 00 90 02 00 00 90 01 00 00 ff ff ff ff
+14:10:24 reply (sw 0x6): OnboardProfiles fn/event 5: 11 ff 0c 56 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:24 reply (sw 0x7): OnboardProfiles fn/event 5: 11 ff 0c 57 50 00 52 00 4f 00 46 00 49 00 4c 00 45 00 5f 00
+14:10:24 reply (sw 0x8): OnboardProfiles fn/event 5: 11 ff 0c 58 4e 00 41 00 4d 00 45 00 5f 00 44 00 45 00 46 00
+14:10:24 reply (sw 0x9): OnboardProfiles fn/event 5: 11 ff 0c 59 41 00 55 00 4c 00 54 00 00 00 00 00 00 00 00 00
+14:10:24 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a 03 00 00 00 00 00 1f 40 64 00 00 03 00 00 00 00
+14:10:24 reply (sw 0xb): OnboardProfiles fn/event 5: 11 ff 0c 5b 00 1f 40 64 00 00 ff ff ff ff ff ff ff ff ff ff
+14:10:24 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c ff ff ff ff ff ff ff ff ff ff ff ff 00 ff fe 7e
+14:10:24 reply (sw 0xd): slot 0x02 fn/event 3: 11 ff 02 3d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:24 reply (sw 0xe): slot 0x02 fn/event 3: 11 ff 02 3e 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:25 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:25 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:26 reply (sw 0xf): OnboardProfiles fn/event 4: 11 ff 0c 4f 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:26 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 02 00 00 60 09 00 00 00 00 00 00 00 00 ff ff ff
+14:10:26 reply (sw 0x2): OnboardProfiles fn/event 5: 11 ff 0c 52 ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0x3): OnboardProfiles fn/event 5: 11 ff 0c 53 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:26 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 80 01 00 10 90 0b ff ff 80 02 01 06 80 02 01 19
+14:10:26 reply (sw 0x5): OnboardProfiles fn/event 5: 11 ff 0c 55 90 0a ff ff 90 02 ff ff 90 01 ff ff ff ff ff ff
+14:10:26 reply (sw 0x6): OnboardProfiles fn/event 5: 11 ff 0c 56 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0x7): OnboardProfiles fn/event 5: 11 ff 0c 57 80 01 00 01 80 01 00 02 80 02 01 17 80 02 01 3d
+14:10:26 reply (sw 0x8): OnboardProfiles fn/event 5: 11 ff 0c 58 80 02 03 17 ff ff ff ff 80 02 01 1b 80 02 01 1d
+14:10:26 reply (sw 0x9): OnboardProfiles fn/event 5: 11 ff 0c 59 80 02 01 27 80 02 01 2b 80 02 03 2b ff ff ff ff
+14:10:26 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0xb): OnboardProfiles fn/event 5: 11 ff 0c 5b ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0xd): OnboardProfiles fn/event 5: 11 ff 0c 5d ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0xe): OnboardProfiles fn/event 5: 11 ff 0c 5e 01 ff ff ff 00 00 00 00 00 00 00 01 ff ff ff 00
+14:10:26 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f 00 00 00 00 00 00 ff ff ff ff ff ff ff ff ff ff
+14:10:26 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 ff ff ff ff ff ff ff ff ff ff ff ff ff ff 47 70
+14:10:26 reply (sw 0x2): slot 0x02 fn/event 3: 11 ff 02 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:26 reply (sw 0x3): slot 0x02 fn/event 3: 11 ff 02 33 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:28 reply (sw 0x4): OnboardProfiles fn/event 4: 11 ff 0c 44 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:30 reply (sw 0x5): OnboardProfiles fn/event 4: 11 ff 0c 45 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:32 reply (sw 0x6): OnboardProfiles fn/event 4: 11 ff 0c 46 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:34 reply (sw 0x7): OnboardProfiles fn/event 4: 11 ff 0c 47 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:36 reply (sw 0x8): OnboardProfiles fn/event 4: 11 ff 0c 48 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:37 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:38 reply (sw 0x9): OnboardProfiles fn/event 4: 11 ff 0c 49 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:38 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a 01 00 00 80 0c 00 00 00 00 00 00 00 00 ff ff ff
+14:10:38 reply (sw 0xb): OnboardProfiles fn/event 5: 11 ff 0c 5b ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:39 reply (sw 0xd): OnboardProfiles fn/event 5: 11 ff 0c 5d 80 01 00 10 90 07 ff ff 90 04 ff ff 90 03 ff ff
+14:10:39 reply (sw 0xe): OnboardProfiles fn/event 5: 11 ff 0c 5e 90 0a ff ff 90 02 ff ff 90 01 ff ff ff ff ff ff
+14:10:39 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x2): OnboardProfiles fn/event 5: 11 ff 0c 52 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x3): OnboardProfiles fn/event 5: 11 ff 0c 53 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x5): OnboardProfiles fn/event 5: 11 ff 0c 55 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x6): OnboardProfiles fn/event 5: 11 ff 0c 56 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x7): OnboardProfiles fn/event 5: 11 ff 0c 57 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0x8): OnboardProfiles fn/event 5: 11 ff 0c 58 01 ff dc 00 00 00 00 00 00 00 00 01 ff dc 00 00
+14:10:39 reply (sw 0x9): OnboardProfiles fn/event 5: 11 ff 0c 59 00 00 00 00 00 00 ff ff ff ff ff ff ff ff ff ff
+14:10:39 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a ff ff ff ff ff ff ff ff ff ff ff ff ff ff e5 e8
+14:10:39 reply (sw 0xb): slot 0x02 fn/event 3: 11 ff 02 3b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:39 reply (sw 0xc): slot 0x02 fn/event 3: 11 ff 02 3c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:41 reply (sw 0xd): OnboardProfiles fn/event 4: 11 ff 0c 4d 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:41 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 05 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:42 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:43 reply (sw 0xe): OnboardProfiles fn/event 4: 11 ff 0c 4e 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:43 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f 01 01 00 b0 04 60 09 80 0c 00 19 00 00 ff ff ff
+14:10:43 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:43 reply (sw 0x2): OnboardProfiles fn/event 5: 11 ff 0c 52 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:43 reply (sw 0x3): OnboardProfiles fn/event 5: 11 ff 0c 53 80 01 00 10 90 07 00 00 90 04 00 00 90 03 00 00
+14:10:43 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 90 0a 00 00 90 02 00 00 90 01 00 00 ff ff ff ff
+14:10:43 reply (sw 0x5): OnboardProfiles fn/event 5: 11 ff 0c 55 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:43 reply (sw 0x6): OnboardProfiles fn/event 5: 11 ff 0c 56 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:43 reply (sw 0x7): OnboardProfiles fn/event 5: 11 ff 0c 57 80 01 00 10 90 07 00 00 90 04 00 00 90 03 00 00
+14:10:43 event: OnboardProfiles fn/event 0: 11 ff 0c 00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:43 reply (sw 0x8): OnboardProfiles fn/event 5: 11 ff 0c 58 90 0a 00 00 90 02 00 00 90 01 00 00 ff ff ff ff
+14:10:43 reply (sw 0x9): OnboardProfiles fn/event 5: 11 ff 0c 59 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:43 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a 50 00 52 00 4f 00 46 00 49 00 4c 00 45 00 5f 00
+14:10:43 reply (sw 0xb): OnboardProfiles fn/event 5: 11 ff 0c 5b 4e 00 41 00 4d 00 45 00 5f 00 44 00 45 00 46 00
+14:10:43 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c 41 00 55 00 4c 00 54 00 00 00 00 00 00 00 00 00
+14:10:43 reply (sw 0xd): OnboardProfiles fn/event 5: 11 ff 0c 5d 03 00 00 00 00 00 1f 40 64 00 00 03 00 00 00 00
+14:10:43 reply (sw 0xe): OnboardProfiles fn/event 5: 11 ff 0c 5e 00 1f 40 64 00 00 ff ff ff ff ff ff ff ff ff ff
+14:10:43 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f ff ff ff ff ff ff ff ff ff ff ff ff 00 ff fe 7e
+14:10:43 reply (sw 0x1): slot 0x02 fn/event 3: 11 ff 02 31 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:43 reply (sw 0x2): slot 0x02 fn/event 3: 11 ff 02 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:45 reply (sw 0x3): OnboardProfiles fn/event 4: 11 ff 0c 43 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:45 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 01 02 00 90 01 20 03 40 06 60 09 00 00 ff ff ff
+14:10:45 reply (sw 0x5): OnboardProfiles fn/event 5: 11 ff 0c 55 ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0x6): OnboardProfiles fn/event 5: 11 ff 0c 56 80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+14:10:45 reply (sw 0x7): OnboardProfiles fn/event 5: 11 ff 0c 57 80 01 00 10 90 07 ff ff 90 04 ff ff 90 03 ff ff
+14:10:45 reply (sw 0x8): OnboardProfiles fn/event 5: 11 ff 0c 58 90 0a ff ff 90 02 ff ff 90 01 ff ff ff ff ff ff
+14:10:45 reply (sw 0x9): OnboardProfiles fn/event 5: 11 ff 0c 59 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xa): OnboardProfiles fn/event 5: 11 ff 0c 5a ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xb): OnboardProfiles fn/event 5: 11 ff 0c 5b ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xc): OnboardProfiles fn/event 5: 11 ff 0c 5c ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xd): OnboardProfiles fn/event 5: 11 ff 0c 5d ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xe): OnboardProfiles fn/event 5: 11 ff 0c 5e ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0xf): OnboardProfiles fn/event 5: 11 ff 0c 5f ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0x1): OnboardProfiles fn/event 5: 11 ff 0c 51 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0x2): OnboardProfiles fn/event 5: 11 ff 0c 52 0a 00 dc ff 1f 40 00 00 00 00 00 0a 00 dc ff 1f
+14:10:45 reply (sw 0x3): OnboardProfiles fn/event 5: 11 ff 0c 53 40 00 00 00 00 00 ff ff ff ff ff ff ff ff ff ff
+14:10:45 reply (sw 0x4): OnboardProfiles fn/event 5: 11 ff 0c 54 ff ff ff ff ff ff ff ff ff ff ff ff ff ff 90 9c
+14:10:45 reply (sw 0x5): slot 0x02 fn/event 3: 11 ff 02 35 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:45 reply (sw 0x6): slot 0x02 fn/event 3: 11 ff 02 36 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:47 reply (sw 0x7): OnboardProfiles fn/event 4: 11 ff 0c 47 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+14:10:49 reply (sw 0x8): OnboardProfiles fn/event 4: 11 ff 0c 48 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+done: 127 reports in 60 s

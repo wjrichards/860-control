@@ -6,6 +6,7 @@ use g512_hidpp::effects::{EffectKind, Rgb};
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::{
+    buttons,
     controller::{Controller, HidrawOpener, SetError},
     keymap::{KeyMap, MapName},
     state::{Effect, InvalidState, LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
@@ -80,7 +81,8 @@ impl Lighting {
         self.mouse_lighting_changed(emitter).await?;
         self.mouse_profiles_changed(emitter).await?;
         self.mouse_active_profile_changed(emitter).await?;
-        self.mouse_dpi_range_changed(emitter).await
+        self.mouse_dpi_range_changed(emitter).await?;
+        self.mouse_buttons_changed(emitter).await
     }
 }
 
@@ -256,6 +258,49 @@ impl Lighting {
     #[zbus(property)]
     async fn mouse_dpi_range(&self) -> (u16, u16, u16) {
         self.ctl().mouse_profiles().map_or((0, 0, 0), |p| (p.dpi_range.min, p.dpi_range.max, p.dpi_range.step))
+    }
+
+    /// Each profile's buttons: (profile number, [(kind, value, modifiers)]),
+    /// buttons in the mouse's order, left click first. Kinds: `mouse` (value
+    /// 1 left, 2 right, 4 middle, 8 back, 16 forward), `key` (HID usage, with
+    /// modifier bits Ctrl 1, Shift 2, Alt 4, Super 8), `media` (consumer
+    /// usage), `special` (mouse function code), `disabled` and `other` (an
+    /// entry this service doesn't write). Empty when unknown.
+    #[zbus(property)]
+    async fn mouse_buttons(&self) -> Vec<(u8, Vec<(String, u16, u8)>)> {
+        let ctl = self.ctl();
+        let profiles = ctl.mouse_profiles().map(|p| p.buttons()).unwrap_or_default();
+        (1..)
+            .zip(profiles)
+            .map(|(number, actions)| {
+                let entries = actions
+                    .into_iter()
+                    .map(|a| {
+                        let (kind, value, modifiers) = buttons::to_bus(a);
+                        (kind.to_string(), value, modifiers)
+                    })
+                    .collect();
+                (number, entries)
+            })
+            .collect()
+    }
+
+    /// Change one button of a profile (1-based) on the mouse. Button 0 (left
+    /// click) and the kind `other` are refused. The first write ever saves a
+    /// backup.
+    async fn set_mouse_button(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        profile: u8,
+        button: u8,
+        kind: String,
+        value: u16,
+        modifiers: u8,
+    ) -> fdo::Result<()> {
+        let result = self.ctl().set_mouse_button(profile, button, &kind, value, modifiers);
+        result.map_err(set_error)?;
+        self.emit_all(&emitter).await?;
+        Ok(())
     }
 
     /// Make a profile (1-based) the mouse's active one.

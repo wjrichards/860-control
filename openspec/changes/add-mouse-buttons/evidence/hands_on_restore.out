@@ -1,0 +1,10 @@
+  mouse on /dev/hidraw3
+  sector 0x0000: Skipped("not a user profile sector")
+  sector 0x0001: Unchanged
+  sector 0x0002: Unchanged
+  sector 0x0003: Unchanged
+  sector 0x0004: Written
+  sector 0x0005: Unchanged
+  the running service has re-read the profiles
+profile 4 active
+profile 4: 4 11 "mouse" 1 0 "mouse" 2 0 "mouse" 4 0 "mouse" 8 0 "mouse" 16 0 "special" 7 0 "special" 4 0 "special" 3 0 "special" 10 0 "special" 2 0 "special" 1 0 
