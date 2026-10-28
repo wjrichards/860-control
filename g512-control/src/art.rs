@@ -4,6 +4,7 @@
 
 use crate::{
     layout::{KEYS, Key},
+    motion::{self, Loop},
     service::{CUSTOM, Keys, LightingState},
 };
 
@@ -77,17 +78,26 @@ pub fn mouse_shown<'a>(
 
 static NO_KEYS: Keys = Vec::new();
 
+/// The loop the shown effect runs, if it moves.
+pub fn shown_loop(shown: &Shown) -> Option<Loop> {
+    match shown {
+        Shown::Colour { effect, .. } | Shown::Rainbow { effect } => motion::effect_loop(effect),
+        Shown::Dark | Shown::Map(_) => None,
+    }
+}
+
 /// Each key's fill, in `KEYS` order: `Some((colour, level))` for a lit key
 /// (`level` 0 to 1 from the animation; 1 when still), `None` for an
 /// outline. `level_at` gives the animation's level for a key; Fn has no
-/// light and is always `None`.
-pub fn key_colours(shown: &Shown, level_at: &dyn Fn(&Key) -> f64) -> Vec<Option<(Rgb, f64)>> {
+/// light and is always `None`. `cycle` is Cycle's hue, in degrees.
+pub fn key_colours(shown: &Shown, level_at: &dyn Fn(&Key) -> f64, cycle: f64) -> Vec<Option<(Rgb, f64)>> {
     KEYS.iter()
         .map(|key| {
             let usage = key.usage?;
             let colour = match shown {
                 Shown::Dark => return None,
                 Shown::Colour { colour, .. } => *colour,
+                Shown::Rainbow { effect: "Cycle" } => hue(cycle),
                 Shown::Rainbow { .. } => hue(f64::from(key.x) / f64::from(crate::layout::WIDTH) * 360.0),
                 Shown::Map(keys) => keys.iter().find(|k| k.0 == usage).map(|&(_, r, g, b)| (r, g, b))?,
             };
@@ -98,12 +108,12 @@ pub fn key_colours(shown: &Shown, level_at: &dyn Fn(&Key) -> f64) -> Vec<Option<
 }
 
 /// The colour the case outline takes: the effect's colour, the map's most
-/// common colour, or `None` when nothing is lit.
-pub fn main_colour(shown: &Shown) -> Option<Rgb> {
+/// common colour, or `None` when nothing is lit. `cycle` is Cycle's hue.
+pub fn main_colour(shown: &Shown, cycle: f64) -> Option<Rgb> {
     match shown {
         Shown::Dark => None,
         Shown::Colour { colour, .. } => Some(*colour),
-        Shown::Rainbow { .. } => Some(hue(0.0)),
+        Shown::Rainbow { .. } => Some(hue(cycle)),
         Shown::Map(keys) => {
             let mut counts: Vec<(Rgb, usize)> = Vec::new();
             for &(_, r, g, b) in keys.iter() {
@@ -177,15 +187,15 @@ mod tests {
         let wasd: Keys = [0x1a, 0x04, 0x16, 0x07].iter().map(|&u| (u, 0x26, 0xa2, 0x69)).collect();
         let s = state(CUSTOM);
         let shown = shown(true, false, &s, &wasd, &EMPTY);
-        let colours = key_colours(&shown, STILL);
+        let colours = key_colours(&shown, STILL, 0.0);
         assert_eq!(lit(&colours), 4);
-        assert_eq!(main_colour(&shown), Some((0x26, 0xa2, 0x69)));
+        assert_eq!(main_colour(&shown, 0.0), Some((0x26, 0xa2, 0x69)));
     }
 
     #[test]
     fn effect_lights_every_key_but_fn() {
         let s = state("Ripple");
-        let colours = key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), STILL);
+        let colours = key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), STILL, 0.0);
         assert_eq!(colours.len(), KEYS.len());
         assert_eq!(lit(&colours), 103, "all but Fn");
         let fn_index = KEYS.iter().position(|k| k.usage.is_none()).unwrap();
@@ -196,8 +206,8 @@ mod tests {
     fn lights_off_lights_nothing() {
         let s = state("Static");
         for shown in [shown(false, false, &s, &EMPTY, &EMPTY), shown(true, false, &state("Off"), &EMPTY, &EMPTY)] {
-            assert_eq!(lit(&key_colours(&shown, STILL)), 0);
-            assert_eq!(main_colour(&shown), None);
+            assert_eq!(lit(&key_colours(&shown, STILL, 0.0)), 0);
+            assert_eq!(main_colour(&shown, 0.0), None);
         }
         let dim = LightingState { brightness: 0, ..state("Static") };
         assert_eq!(shown(true, false, &dim, &EMPTY, &EMPTY), Shown::Dark);
@@ -213,9 +223,9 @@ mod tests {
     #[test]
     fn animation_level_is_carried() {
         let s = state("Breathe");
-        let colours = key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.5);
+        let colours = key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.5, 0.0);
         assert!(colours.iter().flatten().all(|&(_, level)| level == 0.5));
-        assert_eq!(lit(&key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.0)), 0, "a level of 0 is unlit");
+        assert_eq!(lit(&key_colours(&shown(true, false, &s, &EMPTY, &EMPTY), &|_| 0.0, 0.0)), 0, "a level of 0 is unlit");
     }
 
     #[test]

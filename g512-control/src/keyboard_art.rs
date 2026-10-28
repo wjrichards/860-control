@@ -1,6 +1,7 @@
 //! The keyboard illustration at the top of the Keyboard view: lit keys as
 //! solid tiles in their colour, unlit keys as outlines, in a rounded case.
 //! It is a button: clicking it, or Enter while focused, opens Key Maps.
+//! Moving effects play on it while animations are on.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -8,9 +9,10 @@ use gtk::prelude::*;
 
 use crate::{
     art::{self, CARD, Rgb, Shown},
-    art_area::{ArtArea, rounded_rect, set_rgb},
+    art_area::{ArtArea, Ticker, rounded_rect, set_rgb},
     editor::color_name,
     layout::KEYS,
+    motion::{self, Loop},
     service::{Keys, LightingState},
 };
 
@@ -30,11 +32,39 @@ struct Drawn {
     main: Option<Rgb>,
 }
 
+/// What the keyboard shows, kept so each frame can be drawn from it.
+struct Scene {
+    lights_on: bool,
+    gaming_shown: bool,
+    state: LightingState,
+    custom: Keys,
+    gaming: Keys,
+}
+
+impl Scene {
+    fn shown(&self) -> Shown<'_> {
+        art::shown(self.lights_on, self.gaming_shown, &self.state, &self.custom, &self.gaming)
+    }
+
+    /// The frame `t` seconds into the effect's loop, or the still frame.
+    fn frame(&self, t: Option<f64>) -> Drawn {
+        let shown = self.shown();
+        let (l, p) = match (art::shown_loop(&shown), t) {
+            (Some(l), Some(t)) => (Some(l), motion::phase(l, self.state.speed, t)),
+            _ => (None, 0.0),
+        };
+        let cycle = if l == Some(Loop::Cycle) { motion::cycle_degrees(p) } else { 0.0 };
+        let level = |key: &_| l.map_or(1.0, |l| motion::key_level(l, p, key));
+        Drawn { keys: art::key_colours(&shown, &level, cycle), main: art::main_colour(&shown, cycle) }
+    }
+}
+
 pub struct KeyboardArt {
     pub widget: gtk::Box,
     button: gtk::Button,
     area: ArtArea,
-    drawn: Rc<RefCell<Drawn>>,
+    scene: Rc<RefCell<Option<Scene>>>,
+    ticker: Rc<Ticker>,
 }
 
 impl KeyboardArt {
@@ -50,7 +80,14 @@ impl KeyboardArt {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 8);
         widget.append(&button);
         widget.append(&caption);
-        Rc::new(KeyboardArt { widget, button, area, drawn })
+        let scene: Rc<RefCell<Option<Scene>>> = Rc::default();
+        let s = scene.clone();
+        let ticker = Ticker::new(&area, move |t| {
+            if let Some(scene) = s.borrow().as_ref() {
+                *drawn.borrow_mut() = scene.frame(t);
+            }
+        });
+        Rc::new(KeyboardArt { widget, button, area, scene, ticker })
     }
 
     /// `f` runs when the illustration is clicked or activated.
@@ -60,12 +97,16 @@ impl KeyboardArt {
 
     /// Show what the keyboard is showing.
     pub fn show(&self, lights_on: bool, gaming_shown: bool, state: &LightingState, custom: &Keys, gaming: &Keys) {
-        let shown = art::shown(lights_on, gaming_shown, state, custom, gaming);
-        *self.drawn.borrow_mut() = Drawn { keys: art::key_colours(&shown, &|_| 1.0), main: art::main_colour(&shown) };
+        let scene =
+            Scene { lights_on, gaming_shown, state: state.clone(), custom: custom.clone(), gaming: gaming.clone() };
+        let shown = scene.shown();
         self.button.update_property(&[gtk::accessible::Property::Label(&format!(
             "G512 keyboard, {}. Open Key Maps",
             describe(&shown, gaming_shown)
         ))]);
+        let moving = art::shown_loop(&shown).is_some();
+        *self.scene.borrow_mut() = Some(scene);
+        self.ticker.set_wanted(moving);
         self.area.queue_draw();
     }
 }

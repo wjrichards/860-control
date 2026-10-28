@@ -26,6 +26,7 @@ pub struct Callouts {
     pub grid: gtk::Grid,
     items: Vec<Callout>,
     on_open: Handler<usize>,
+    on_highlight: Handler<Option<usize>>,
 }
 
 impl Callouts {
@@ -67,7 +68,7 @@ impl Callouts {
                 Callout { index, badge: spot.badge, button, action }
             })
             .collect();
-        let callouts = Rc::new(Callouts { grid, items, on_open: RefCell::new(None) });
+        let callouts = Rc::new(Callouts { grid, items, on_open: RefCell::new(None), on_highlight: RefCell::new(None) });
         for item in &callouts.items {
             let (weak, index) = (Rc::downgrade(&callouts), item.index);
             item.button.connect_clicked(move |_| {
@@ -77,9 +78,28 @@ impl Callouts {
                     f(index);
                 }
             });
+            // Pointing at a callout, or focusing it, highlights its button on the drawing.
+            let motion = gtk::EventControllerMotion::new();
+            let focus = gtk::EventControllerFocus::new();
+            let (weak, at) = (Rc::downgrade(&callouts), Some(item.index));
+            motion.connect_enter(move |_, _, _| highlight(&weak, at));
+            let weak = Rc::downgrade(&callouts);
+            motion.connect_leave(move |_| highlight(&weak, None));
+            let (weak, at) = (Rc::downgrade(&callouts), Some(item.index));
+            focus.connect_enter(move |_| highlight(&weak, at));
+            let weak = Rc::downgrade(&callouts);
+            focus.connect_leave(move |_| highlight(&weak, None));
+            item.button.add_controller(motion);
+            item.button.add_controller(focus);
         }
         callouts.arrange(true);
         callouts
+    }
+
+    /// `f` gets the service index of the button whose callout the pointer or
+    /// focus is on, or `None` when it leaves.
+    pub fn connect_highlight(&self, f: impl Fn(Option<usize>) + 'static) {
+        *self.on_highlight.borrow_mut() = Some(Box::new(f));
     }
 
     /// `f` gets the service index of the button whose callout was activated.
@@ -118,5 +138,13 @@ impl Callouts {
             ))]);
             item.button.set_visible(true);
         }
+    }
+}
+
+fn highlight(callouts: &std::rc::Weak<Callouts>, index: Option<usize>) {
+    if let Some(c) = callouts.upgrade()
+        && let Some(f) = c.on_highlight.borrow().as_ref()
+    {
+        f(index);
     }
 }

@@ -582,8 +582,9 @@ impl Ui {
             glib::spawn_future_local(async move {
                 let result =
                     bus.lighting.set_mouse_button(profile, button, &action.kind, action.value, action.modifiers).await;
-                if let Err(e) = result {
-                    ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e)));
+                match result {
+                    Ok(_) => ui.mouse_art.confirm(usize::from(button)),
+                    Err(e) => ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e))),
                 }
                 ui.refresh().await;
             });
@@ -672,6 +673,15 @@ impl Ui {
         *self.bus.borrow_mut() = Some(bus.clone());
         self.refresh().await;
         self.debug_screenshot();
+        // For the reduced-motion check: how many effect frames have been drawn.
+        if std::env::var_os("G512_CONTROL_TICK_LOG").is_some() {
+            glib::timeout_add_seconds_local(2, || {
+                let animations = gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations());
+                let ticks = crate::art_area::TICKS.load(std::sync::atomic::Ordering::Relaxed);
+                eprintln!("ticks: {ticks} (animations {animations})");
+                glib::ControlFlow::Continue
+            });
+        }
 
         // The service restarting, or any property change, re-reads everything.
         if let Ok(dbus) = DBusProxy::new(&conn).await
@@ -698,7 +708,8 @@ impl Ui {
     /// For checks against the design boards: with `G512_CONTROL_SCREENSHOT`
     /// set to a PNG path, show the view named by `G512_CONTROL_VIEW` (if any)
     /// and render the window to that file once it has drawn. `G512_CONTROL_SIZE`
-    /// (e.g. `360x800`) sizes the window first.
+    /// (e.g. `360x800`) sizes the window first. `G512_CONTROL_FRAMES=N` saves N
+    /// frames at about 30 a second instead, to a path with `%04d` in it.
     fn debug_screenshot(&self) {
         let Ok(path) = std::env::var("G512_CONTROL_SCREENSHOT") else { return };
         if let Ok(view) = std::env::var("G512_CONTROL_VIEW") {
@@ -710,16 +721,32 @@ impl Ui {
         }) {
             self.window.set_default_size(w, h);
         }
+        let frames: u32 = std::env::var("G512_CONTROL_FRAMES").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
         let window = self.window.clone();
-        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+        let shot = move |path: &str| {
             let paintable = gtk::WidgetPaintable::new(Some(&window));
             let (w, h) = (window.width(), window.height());
             let snapshot = gtk::Snapshot::new();
             paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
-            let saved = snapshot.to_node().zip(window.native().and_then(|n| n.renderer())).map(|(node, renderer)| {
-                renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32))).save_to_png(&path)
+            snapshot.to_node().zip(window.native().and_then(|n| n.renderer())).map(|(node, renderer)| {
+                renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32))).save_to_png(path)
+            })
+        };
+        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+            if frames <= 1 {
+                eprintln!("screenshot {path}: {:?}", shot(&path));
+                return;
+            }
+            let mut i = 0;
+            glib::timeout_add_local(Duration::from_millis(33), move || {
+                let saved = shot(&path.replace("%04d", &format!("{i:04}")));
+                i += 1;
+                if i < frames && matches!(saved, Some(Ok(()))) {
+                    return glib::ControlFlow::Continue;
+                }
+                eprintln!("frames {path}: {i} saved, last {saved:?}");
+                glib::ControlFlow::Break
             });
-            eprintln!("screenshot {path}: {saved:?}");
         });
     }
 
@@ -741,19 +768,22 @@ impl Ui {
                     let kb = match &keyboard {
                         DeviceState::Connected { state, per_key, lights_on, .. } => {
                             let on = lights_on.unwrap_or(true);
-                            Some((on, art::shown(on, per_key.game_active, state, &per_key.custom, &per_key.gaming)))
+                            let shown = art::shown(on, per_key.game_active, state, &per_key.custom, &per_key.gaming);
+                            Some((on, shown, state.speed))
                         }
                         _ => None,
                     };
-                    let lights_on = kb.as_ref().is_none_or(|(on, _)| *on);
-                    let shown = art::mouse_shown(lights_on, m.matching, &m.lighting, kb.map(|(_, s)| s));
+                    let lights_on = kb.as_ref().is_none_or(|(on, ..)| *on);
+                    // A matching mouse runs at the keyboard's speed.
+                    let speed = kb.as_ref().filter(|_| m.matching).map_or(m.lighting.speed, |&(.., speed)| speed);
+                    let shown = art::mouse_shown(lights_on, m.matching, &m.lighting, kb.map(|(_, s, _)| s));
                     let actions = m
                         .buttons
                         .iter()
                         .find(|(number, _)| *number == m.active_profile)
                         .filter(|_| m.state == "connected")
                         .map(|(_, actions)| actions.as_slice());
-                    self.mouse_art.show(&shown, actions);
+                    self.mouse_art.show(&shown, speed, actions);
                 }
                 match mouse.as_deref().map(|m| m.state.as_str()) {
                     Some("connected") | None => self.mouse_stack.set_visible_child_name("controls"),

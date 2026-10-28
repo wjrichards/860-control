@@ -12,6 +12,7 @@ mod keyboard_art;
 mod layout;
 mod mouse_art;
 mod mouse_ink;
+mod motion;
 mod mouse_section;
 mod profile_edit;
 mod profile_section;

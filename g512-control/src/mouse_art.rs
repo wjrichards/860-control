@@ -3,17 +3,22 @@
 //! with the DPI LEDs and G logo lit and glowing, and a numbered badge on
 //! each programmable button, in a card with the callouts. Clicking a button
 //! on the drawing reports it like its callout.
+//!
+//! Breathe and Cycle play on the LEDs, logo and glow while animations are
+//! on. Hovering a button, or its callout, fills it and sends a ring out
+//! once; applying a change gives it a confirm pulse.
 
 use std::{cell::RefCell, rc::Rc};
 
-use gtk::prelude::*;
+use adw::prelude::*;
 
 use crate::{
     art::{self, CARD, Rgb, Shown},
-    art_area::{ArtArea, rounded_rect, set_rgb},
+    art_area::{ArtArea, Ticker, rounded_rect, set_rgb},
     callouts::Callouts,
     change_dialog::Handler,
     editor::color_name,
+    motion::{self, Loop, ease_out_cubic},
     mouse_ink::{self, Ink},
     service::ButtonAction,
 };
@@ -29,6 +34,10 @@ const SIDE_W: f64 = 270.0;
 const BADGE_R: f64 = 8.0;
 /// Badges: `color.accent-strong` (#1D8092), white numbers at 4.61:1.
 const BADGE: Rgb = (0x1d, 0x80, 0x92);
+/// The hover fill and ring, and the confirm pulse (D5, the `04 Motion` board).
+const FILL_MS: u32 = 250;
+const RING_MS: u32 = 600;
+const CONFIRM_S: f64 = 1.85;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
@@ -89,14 +98,60 @@ pub fn hit(x: f64, y: f64, top: &Ink, side: &Ink) -> Option<&'static Hotspot> {
 
 #[derive(Default)]
 struct State {
-    /// The lighting colour; `None` while the mouse's lights are off.
+    /// The lighting colour before Cycle turns it; `None` while the lights are off.
+    base: Option<Rgb>,
+    /// The effect's loop and speed, if it moves.
+    effect: Option<(Loop, u8)>,
+    /// This frame's colour, and its LED, logo and glow level, 0 to 1.
     colour: Option<Rgb>,
-    /// LED, logo and glow brightness, 0 to 1 (animated by effects).
     level: f64,
     /// Draw the numbered badges (the mouse's buttons are known).
     badges: bool,
-    /// The service button index under the pointer.
+    /// The button the pointer or a callout points at.
+    target: Option<u8>,
+    /// The button drawn highlighted (it stays while its fill fades), its
+    /// fill, 0 to 1, and its ring's progress, 0 to 1 (1 is done).
     hover: Option<u8>,
+    fill: f64,
+    ring: f64,
+    /// The button just changed, and seconds into its confirm pulse.
+    confirm: Option<u8>,
+    confirm_t: f64,
+}
+
+impl State {
+    /// Set the frame `t` seconds into the effect's loop, or the still frame.
+    fn frame(&mut self, t: Option<f64>) {
+        let (colour, level) = match (self.effect, t) {
+            (Some((l, speed)), Some(t)) => {
+                let p = motion::phase(l, speed, t);
+                match l {
+                    Loop::Cycle => (self.base.map(|_| art::hue(motion::cycle_degrees(p))), 1.0),
+                    Loop::Breathe => (self.base, motion::breathe_level(p)),
+                    Loop::Ripple | Loop::Wave => (self.base, 1.0),
+                }
+            }
+            _ => (self.base, 1.0),
+        };
+        self.colour = colour;
+        self.level = if colour.is_some() { level } else { 0.0 };
+    }
+}
+
+/// An animation of `0..=to` over `ms` that sets a state field and redraws.
+fn animation(
+    area: &ArtArea,
+    state: &Rc<RefCell<State>>,
+    to: f64,
+    ms: u32,
+    set: fn(&mut State, f64),
+) -> adw::TimedAnimation {
+    let (s, a) = (state.clone(), area.clone());
+    let target = adw::CallbackAnimationTarget::new(move |v| {
+        set(&mut s.borrow_mut(), v);
+        a.queue_draw();
+    });
+    adw::TimedAnimation::builder().widget(area).value_from(0.0).value_to(to).duration(ms).target(&target).build()
 }
 
 pub struct MouseArt {
@@ -108,6 +163,10 @@ pub struct MouseArt {
     state: Rc<RefCell<State>>,
     inks: Rc<(Ink, Ink)>,
     on_button: Rc<Handler<usize>>,
+    ticker: Rc<Ticker>,
+    fill: adw::TimedAnimation,
+    ring: adw::TimedAnimation,
+    confirm: adw::TimedAnimation,
 }
 
 impl MouseArt {
@@ -116,7 +175,8 @@ impl MouseArt {
             mouse_ink::parse(mouse_ink::TOP_SVG).expect("the top-view SVG parses (tested)"),
             mouse_ink::parse(mouse_ink::SIDE_SVG).expect("the side-view SVG parses (tested)"),
         ));
-        let state: Rc<RefCell<State>> = Rc::default();
+        // No ring or pulse until something starts one.
+        let state = Rc::new(RefCell::new(State { ring: 1.0, confirm_t: CONFIRM_S, ..State::default() }));
         let (s, i) = (state.clone(), inks.clone());
         let area =
             ArtArea::new(AREA_W / AREA_H, AREA_W as i32, Box::new(move |cr, w, h| draw(cr, w, h, &s.borrow(), &i)));
@@ -146,7 +206,20 @@ impl MouseArt {
                 f(index);
             }
         });
-        let art = Rc::new(MouseArt { widget, area, hint, callouts, state, inks, on_button });
+        let s = state.clone();
+        let ticker = Ticker::new(&area, move |t| s.borrow_mut().frame(t));
+        let fill = animation(&area, &state, 1.0, FILL_MS, |st, v| st.fill = v);
+        fill.set_easing(adw::Easing::EaseOutCubic);
+        let ring = animation(&area, &state, 1.0, RING_MS, |st, v| st.ring = v);
+        let confirm = animation(&area, &state, CONFIRM_S, (CONFIRM_S * 1000.0) as u32, |st, v| st.confirm_t = v);
+        let art =
+            Rc::new(MouseArt { widget, area, hint, callouts, state, inks, on_button, ticker, fill, ring, confirm });
+        let weak = Rc::downgrade(&art);
+        art.callouts.connect_highlight(move |index| {
+            if let Some(art) = weak.upgrade() {
+                art.highlight(index.map(|i| i as u8));
+            }
+        });
         art.connect_pointer();
         art.set_compact(true);
         art
@@ -166,18 +239,20 @@ impl MouseArt {
         self.callouts.arrange(compact);
     }
 
-    /// Show what the mouse is showing, and the active profile's actions
-    /// (`None` while they're unknown: no badges and no callouts).
-    pub fn show(&self, shown: &Shown, actions: Option<&[ButtonAction]>) {
-        let badges = actions.is_some();
+    /// Show what the mouse is showing at its effect `speed`, and the active
+    /// profile's actions (`None` while they're unknown: no badges and no
+    /// callouts).
+    pub fn show(&self, shown: &Shown, speed: u8, actions: Option<&[ButtonAction]>) {
         self.callouts.show(actions);
-        let colour = art::main_colour(shown);
+        let effect = art::shown_loop(shown).map(|l| (l, speed));
         {
             let mut st = self.state.borrow_mut();
-            st.colour = colour;
-            st.level = if colour.is_some() { 1.0 } else { 0.0 };
-            st.badges = badges;
+            st.base = art::main_colour(shown, 0.0);
+            st.effect = effect;
+            st.badges = actions.is_some();
+            st.frame(None);
         }
+        self.ticker.set_wanted(effect.is_some());
         let description = match shown {
             Shown::Dark => "lights off".into(),
             Shown::Colour { effect, colour } => format!("{effect}, {}", color_name(*colour)),
@@ -186,6 +261,41 @@ impl MouseArt {
         };
         self.area.update_property(&[gtk::accessible::Property::Label(&format!("G502 HERO mouse, {description}"))]);
         self.area.queue_draw();
+    }
+
+    /// Highlight a button (`None` ends it): the fill comes in over 250 ms
+    /// with one ring out from it, and fades out when the highlight ends.
+    /// Left Click can't be changed, so it isn't highlighted.
+    fn highlight(&self, button: Option<u8>) {
+        let button = button.filter(|&b| b != 0);
+        let fill = {
+            let mut st = self.state.borrow_mut();
+            if st.target == button {
+                return;
+            }
+            st.target = button;
+            if button.is_some() {
+                st.hover = button;
+            }
+            st.fill
+        };
+        // The animations call back into the state: no borrow is held here.
+        if button.is_some() {
+            self.fill.set_value_from(0.0);
+            self.fill.set_value_to(1.0);
+            self.ring.play();
+        } else {
+            self.fill.set_value_from(fill);
+            self.fill.set_value_to(0.0);
+        }
+        self.fill.play();
+    }
+
+    /// The confirm pulse on a button whose change was applied: a white
+    /// flash and a ring, the fill held for a second, then a fade.
+    pub fn confirm(&self, button: usize) {
+        self.state.borrow_mut().confirm = Some(button as u8);
+        self.confirm.play();
     }
 
     /// Area pixels from widget pixels (the drawing is centred and scaled).
@@ -201,18 +311,14 @@ impl MouseArt {
         motion.connect_motion(move |_, x, y| {
             let Some(art) = weak.upgrade() else { return };
             let (ax, ay) = art.to_area(x, y);
-            let over = hit(ax, ay, &art.inks.0, &art.inks.1).map(|s| s.button);
-            if art.state.borrow().hover != over {
-                art.state.borrow_mut().hover = over;
-                art.area.set_cursor_from_name(over.filter(|&b| b != 0).map(|_| "pointer"));
-                art.area.queue_draw();
-            }
+            let over = hit(ax, ay, &art.inks.0, &art.inks.1).map(|s| s.button).filter(|&b| b != 0);
+            art.area.set_cursor_from_name(over.map(|_| "pointer"));
+            art.highlight(over);
         });
         let weak = Rc::downgrade(self);
         motion.connect_leave(move |_| {
             if let Some(art) = weak.upgrade() {
-                art.state.borrow_mut().hover = None;
-                art.area.queue_draw();
+                art.highlight(None);
             }
         });
         self.area.add_controller(motion);
@@ -253,6 +359,24 @@ fn trace_g_side(cr: &gtk::cairo::Context) {
     cr.set_matrix(m);
 }
 
+/// A button's fill at `fill` (0 to 1), and a ring of (radius, opacity)
+/// around its centre, in the view's SVG units.
+fn pulse(cr: &gtk::cairo::Context, spot: &Hotspot, colour: Rgb, fill: f64, ring: Option<(f64, f64)>) {
+    let (x, y, w, h) = spot.rect;
+    if fill > 0.01 {
+        rounded_rect(cr, x, y, w, h, 6.0);
+        set_rgb(cr, colour, 0.45 * fill.min(1.0));
+        let _ = cr.fill();
+    }
+    if let Some((r, opacity)) = ring {
+        cr.new_sub_path();
+        cr.arc(x + w / 2.0, y + h / 2.0, r, 0.0, std::f64::consts::TAU);
+        set_rgb(cr, colour, opacity);
+        cr.set_line_width(5.0);
+        let _ = cr.stroke();
+    }
+}
+
 fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, st: &State, inks: &(Ink, Ink)) {
     let s = (w / AREA_W).min(h / AREA_H);
     cr.translate((w - AREA_W * s) / 2.0, (h - AREA_H * s) / 2.0);
@@ -291,12 +415,18 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, st: &State, inks: &(Ink, Ink))
         cr.set_line_width(if view == View::Top { 6.5 } else { 7.0 });
         cr.set_line_cap(gtk::cairo::LineCap::Round);
         let _ = cr.stroke();
-        // The hovered button.
-        if let Some(spot) = HOTSPOTS.iter().find(|s| s.view == view && Some(s.button) == st.hover && s.button != 0) {
-            let (x, y, bw, bh) = spot.rect;
-            rounded_rect(cr, x, y, bw, bh, 6.0);
-            set_rgb(cr, line_rgb, 0.35);
-            let _ = cr.fill();
+        // The highlighted button, and the confirm pulse.
+        let spot_of = |button: Option<u8>| HOTSPOTS.iter().find(|s| s.view == view && Some(s.button) == button);
+        if let Some(spot) = spot_of(st.hover) {
+            let ring = (st.ring < 1.0).then(|| (30.0 + ease_out_cubic(st.ring) * 45.0, 1.0 - st.ring));
+            pulse(cr, spot, line_rgb, st.fill, ring);
+        }
+        if let Some(spot) = spot_of(st.confirm).filter(|_| st.confirm_t < CONFIRM_S) {
+            let e = st.confirm_t;
+            let colour = if e < 0.25 { (255, 255, 255) } else { line_rgb };
+            let fill = if e < 1.6 { 1.0 } else { 1.0 - (e - 1.6) / 0.25 };
+            let ring = (e < 0.6).then(|| (30.0 + ease_out_cubic(e / 0.6) * 50.0, 1.0 - e / 0.6));
+            pulse(cr, spot, colour, fill, ring);
         }
         cr.set_matrix(m);
     }

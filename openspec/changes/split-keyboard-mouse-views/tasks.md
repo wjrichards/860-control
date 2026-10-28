@@ -55,7 +55,7 @@
 
 ## 6. Motion
 
-- [ ] 6.1 Add the pure effect functions (Ripple ring, Wave band, Breathe level, Cycle hue, scaled by speed). Verify with unit tests against `render.py`'s keyframes at 0.6 s, 1.5 s and 2 s.
+- [x] 6.1 Add the pure effect functions (Ripple ring, Wave band, Breathe level, Cycle hue, scaled by speed). Verify with unit tests against `render.py`'s keyframes at 0.6 s, 1.5 s and 2 s.
 - [ ] 6.2 Add tick callbacks that run only while mapped, while animating, and while `gtk-enable-animations` is true. Add the hover, ring and confirm `adw::TimedAnimation`s (D5). Verify:
   - a screen recording of Ripple, Wave and Breathe on the Keyboard page, and of G9's hover and confirm, compared with `motion-preview.webm`;
   - with animations turned off (`gsettings set org.gnome.desktop.interface enable-animations false`), the illustrations are still and the tick count stays 0 (debug log).

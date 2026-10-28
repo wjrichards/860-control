@@ -1,5 +1,12 @@
 //! A drawing area that keeps its aspect ratio: height follows width, so an
-//! illustration fits a wide window and a phone-width column alike.
+//! illustration fits a wide window and a phone-width column alike. Plus the
+//! ticker that runs an illustration's effect loop on the frame clock.
+
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
@@ -7,8 +14,6 @@ use gtk::{glib, prelude::*, subclass::prelude::*};
 pub type DrawFn = Box<dyn Fn(&gtk::cairo::Context, f64, f64)>;
 
 mod imp {
-    use std::cell::{Cell, RefCell};
-
     use super::*;
 
     #[derive(Default)]
@@ -78,6 +83,81 @@ impl ArtArea {
         imp.natural_width.set(natural_width);
         *imp.draw.borrow_mut() = Some(draw);
         area
+    }
+}
+
+/// Frames drawn by effect loops, for the reduced-motion check
+/// (`G512_CONTROL_TICK_LOG` prints it).
+pub static TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// Runs an effect loop on an area's frame clock. `on_frame(Some(seconds))`
+/// runs every frame while the area is mapped, a loop is wanted and the
+/// system's animations are on; `on_frame(None)` sets the still frame
+/// whenever they aren't.
+pub struct Ticker {
+    area: ArtArea,
+    wanted: Cell<bool>,
+    id: RefCell<Option<gtk::TickCallbackId>>,
+    on_frame: Rc<dyn Fn(Option<f64>)>,
+}
+
+impl Ticker {
+    pub fn new(area: &ArtArea, on_frame: impl Fn(Option<f64>) + 'static) -> Rc<Self> {
+        let ticker = Rc::new(Ticker {
+            area: area.clone(),
+            wanted: Cell::new(false),
+            id: RefCell::new(None),
+            on_frame: Rc::new(on_frame),
+        });
+        let weak = Rc::downgrade(&ticker);
+        area.connect_map(move |_| {
+            if let Some(t) = weak.upgrade() {
+                t.update();
+            }
+        });
+        let weak = Rc::downgrade(&ticker);
+        area.connect_unmap(move |_| {
+            if let Some(t) = weak.upgrade() {
+                t.update();
+            }
+        });
+        if let Some(settings) = gtk::Settings::default() {
+            let weak = Rc::downgrade(&ticker);
+            settings.connect_gtk_enable_animations_notify(move |_| {
+                if let Some(t) = weak.upgrade() {
+                    t.update();
+                }
+            });
+        }
+        ticker
+    }
+
+    /// Whether the shown effect moves.
+    pub fn set_wanted(&self, wanted: bool) {
+        self.wanted.set(wanted);
+        self.update();
+    }
+
+    fn update(&self) {
+        let animations = gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations());
+        let run = self.wanted.get() && self.area.is_mapped() && animations;
+        let running = self.id.borrow().is_some();
+        if run && !running {
+            let on_frame = self.on_frame.clone();
+            let id = self.area.add_tick_callback(move |area, clock| {
+                TICKS.fetch_add(1, Ordering::Relaxed);
+                on_frame(Some(clock.frame_time() as f64 / 1e6));
+                area.queue_draw();
+                glib::ControlFlow::Continue
+            });
+            *self.id.borrow_mut() = Some(id);
+        } else if !run {
+            if let Some(id) = self.id.borrow_mut().take() {
+                id.remove();
+            }
+            (self.on_frame)(None);
+            self.area.queue_draw();
+        }
     }
 }
 
