@@ -62,9 +62,9 @@
 
 ## 7. Docs and checks
 
-- [ ] 7.1 README: the two views, the illustrations, motion and Reduce Animation, and the art's source. Verify the README renders, and that its udev instructions match the app's command.
-- [ ] 7.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, `openspec validate --strict` for the change and specs, and the Flatpak build with the SVGs in place. Verify that all pass.
-- [ ] 7.3 Design review: compare the built screens with the Penpot boards (`penpot-design-to-code-review`), and list or fix the differences. Verify with a written comparison in `evidence/design-review.md`.
+- [x] 7.1 README: the two views, the illustrations, motion and Reduce Animation, and the art's source. Verify the README renders, and that its udev instructions match the app's command.
+- [x] 7.2 Workspace checks: clippy `-D warnings` and tests in the GNOME SDK, `openspec validate --strict` for the change and specs, and the Flatpak build with the SVGs in place. Verify that all pass.
+- [x] 7.3 Design review: compare the built screens with the Penpot boards (`penpot-design-to-code-review`), and list or fix the differences. Verify with a written comparison in `evidence/design-review.md`.
 - [ ] 7.4 Hands-on pass with the user:
   - switch views;
   - narrow the window;
