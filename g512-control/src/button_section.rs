@@ -1,4 +1,4 @@
-//! The Mouse Buttons group: what each button of the active profile does,
+//! The Mouse view's Buttons group: what each button of the active profile does,
 //! and the Change dialog for it. Left click can't be changed.
 //!
 //! All rows are built once and shown or hidden as the mouse needs; rows
@@ -36,7 +36,7 @@ pub struct ButtonSection {
 
 impl ButtonSection {
     pub fn new() -> Rc<Self> {
-        let group = adw::PreferencesGroup::builder().title("Mouse Buttons").visible(false).build();
+        let group = adw::PreferencesGroup::builder().title("Buttons").visible(false).build();
         let rows: Vec<ButtonRow> = (0..MAX_BUTTONS)
             .map(|i| {
                 let row = adw::ActionRow::builder().title(button_name(i)).visible(false).build();

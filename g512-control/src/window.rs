@@ -286,7 +286,7 @@ impl Ui {
 
         let device_row = adw::ActionRow::new();
         device_row.add_prefix(&gtk::Image::from_icon_name("input-keyboard-symbolic"));
-        let device_group = adw::PreferencesGroup::builder().title("Keyboard").build();
+        let device_group = adw::PreferencesGroup::builder().title("Device").build();
         device_group.add(&device_row);
 
         let effect_names = gtk::StringList::new(&[]);
@@ -357,6 +357,7 @@ impl Ui {
         mouse_page.add(&mouse_art_group);
         let mouse_section = MouseSection::new();
         mouse_page.add(&mouse_section.group);
+        mouse_page.add(&mouse_section.lighting_group);
         let profile_section = ProfileSection::new();
         mouse_page.add(&profile_section.group);
         let button_section = ButtonSection::new();

@@ -1,5 +1,5 @@
-//! The Mouse group: the G502 HERO's status, Match Keyboard, and its own
-//! lighting while it isn't matching.
+//! The Mouse view's Device and Lighting groups: the G502 HERO's status, then
+//! Match Keyboard and its own lighting while it isn't matching.
 
 use std::{
     cell::{Cell, RefCell},
@@ -20,6 +20,7 @@ type Handler<T> = RefCell<Option<Box<dyn Fn(T)>>>;
 
 pub struct MouseSection {
     pub group: adw::PreferencesGroup,
+    pub lighting_group: adw::PreferencesGroup,
     status_row: adw::ActionRow,
     match_row: adw::SwitchRow,
     effect_row: adw::ComboRow,
@@ -65,16 +66,19 @@ impl MouseSection {
         let brightness_row = adw::ActionRow::builder().title("Brightness").build();
         brightness_row.add_suffix(&brightness);
 
-        let group = adw::PreferencesGroup::builder().title("Mouse").visible(false).build();
-        for row in [status_row.upcast_ref::<gtk::Widget>(), match_row.upcast_ref(), effect_row.upcast_ref()] {
-            group.add(row);
+        let group = adw::PreferencesGroup::builder().title("Device").visible(false).build();
+        group.add(&status_row);
+        let lighting_group = adw::PreferencesGroup::builder().title("Lighting").visible(false).build();
+        for row in [match_row.upcast_ref::<gtk::Widget>(), effect_row.upcast_ref()] {
+            lighting_group.add(row);
         }
         for row in [&color_row, &speed_row, &brightness_row] {
-            group.add(row);
+            lighting_group.add(row);
         }
 
         let section = Rc::new(MouseSection {
             group,
+            lighting_group,
             status_row,
             match_row,
             effect_row,
@@ -143,9 +147,11 @@ impl MouseSection {
     pub fn show(&self, mouse: Option<&Mouse>) {
         let Some(m) = mouse else {
             self.group.set_visible(false);
+            self.lighting_group.set_visible(false);
             return;
         };
         self.group.set_visible(true);
+        self.lighting_group.set_visible(true);
         let connected = m.state == "connected";
         self.connected.set(connected);
         let (title, subtitle) = match m.state.as_str() {

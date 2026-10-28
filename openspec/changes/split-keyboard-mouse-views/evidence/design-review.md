@@ -16,6 +16,7 @@
 | All screens | `AdwPreferencesPage` clamped every view to 600 px, so the keyboard card was about 570 px wide and the mouse callouts didn't fit beside the drawing. | Each view is clamped to its board width: 694 px for the keyboard and 760 px for the mouse (design.md D1). |
 | `05-after-mouse` | The hint sat under the drawing, and the callouts were too tall to sit beside it. | The hint sits under the side view, and the callouts are compact chips in two columns (1–6 and 7–11) beside the drawing, as on the board. |
 | `05-narrow-mouse` | — | Both views on top, the callouts in pairs below, and no hint, as on the board. |
+| All screens | The groups kept their older titles: Keyboard, Mouse, Mouse Profile, Mouse Buttons. | With the user's OK, they're titled as on the boards: Device, Lighting, Games on the Keyboard view; Device, Lighting, Profile, Buttons on the Mouse view. The single "Mouse" group is split into Device and Lighting. A spec delta renames the "Mouse Buttons" group in "Mouse button controls". `app/mouse-groups.png` shows the result. |
 
 ## Matches
 
@@ -31,20 +32,16 @@
 
 ## Differences left in place, for the user to decide
 
-1. **Group titles.** The boards title the groups by what they are: Device, Lighting, Profile, Buttons. The app keeps its older titles: "Keyboard" and "Mouse" for the device groups, plus "Mouse Profile" and "Mouse Buttons". Now that each view is named for its device, the prefix repeats the view's name.
-   - Renaming is a one-line change per group.
-   - But the main spec names a "Mouse Buttons group" (from add-mouse-buttons), and the README uses the same names.
-   - **Recommendation:** rename to match the boards, with a spec delta for "Mouse Buttons". Not done here without the user's say.
-2. **The mouse drawing is a little smaller** than on the board (about 440 px wide against 480 px), because the card's 16 px padding comes out of the same 760 px. It's not worth shrinking the callouts to win it back.
-3. **The narrow keyboard caption** says "Click the keyboard to edit Key Maps" where the narrow board says "Tap". It's a desktop app, so it stays "Click", and the wide and narrow captions are the same.
-4. **The narrow board leaves out the subtitle** of the Edit Key Maps row. The app keeps it at every width, because it explains what the page does.
-5. **Status page icons.** The boards drew outline icons: a keyboard, and a mouse for both "not connected" and "no access". The app uses GNOME's symbolic icons:
+1. **The mouse drawing is a little smaller** than on the board (about 440 px wide against 480 px), because the card's 16 px padding comes out of the same 760 px. It's not worth shrinking the callouts to win it back.
+2. **The narrow keyboard caption** says "Click the keyboard to edit Key Maps" where the narrow board says "Tap". It's a desktop app, so it stays "Click", and the wide and narrow captions are the same.
+3. **The narrow board leaves out the subtitle** of the Edit Key Maps row. The app keeps it at every width, because it explains what the page does.
+4. **Status page icons.** The boards drew outline icons: a keyboard, and a mouse for both "not connected" and "no access". The app uses GNOME's symbolic icons:
    - `input-keyboard-symbolic` and `input-mouse-symbolic` for "not connected";
    - `dialog-password-symbolic` (a key) for "no access", which says "permission" more plainly.
    These follow the HIG and the user's icon theme.
-6. **Status page wording.** The boards say "The Mouse tab keeps working"; the app says "view", to match the README and the switcher's accessible names.
-7. **The no-access command shows as selected** when the page opens. The label is selectable, and GTK selects its text when it gets the first focus. That lets a keyboard user press Ctrl+C straight away. This was already the case before this change (the same label is on main).
-8. **The command block** shows one rule per line, at full width, where the board wraps it narrower. The text is the same.
+5. **Status page wording.** The boards say "The Mouse tab keeps working"; the app says "view", to match the README and the switcher's accessible names.
+6. **The no-access command shows as selected** when the page opens. The label is selectable, and GTK selects its text when it gets the first focus. That lets a keyboard user press Ctrl+C straight away. This was already the case before this change (the same label is on main).
+7. **The command block** shows one rule per line, at full width, where the board wraps it narrower. The text is the same.
 
 ## Open checks (task 7.4)
 

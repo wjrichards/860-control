@@ -108,7 +108,7 @@ The mouse stays in its own onboard-profile mode, so its DPI buttons keep working
 
 ### DPI, report rate and profiles
 
-The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The **Mouse Profile** section shows the active profile:
+The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The Mouse view's **Profile** group shows the active profile:
 - **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away. G9, the button behind the wheel, also switches profiles on the mouse; the app follows within about 2 seconds.
 - **Report Rate:** 125, 250, 500 or 1000 Hz.
 - **DPI steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
@@ -125,7 +125,7 @@ Only the report rate, DPI steps and default step are changed here. Button assign
 
 ### Buttons
 
-The **Mouse Buttons** section lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. The same list sits beside the mouse drawing, numbered to match it. **Change**, a button in that list, or the button itself on the drawing opens a dialog with:
+The **Buttons** group lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. The same list sits beside the mouse drawing, numbered to match it. **Change**, a button in that list, or the button itself on the drawing opens a dialog with:
 - **Mouse Button:** left, right or middle click, back or forward;
 - **Keyboard Shortcut:** choose **Set Shortcut**, then press the keys, for example Ctrl+C. Esc cancels. Letters, digits, F1 to F12, Enter, Tab, Space, Backspace, punctuation, the arrows and Insert, Delete, Home, End, Page Up and Page Down work; the dialog says when a key can't be used;
 - **Media Key:** play/pause, next and previous track, volume up and down, mute;

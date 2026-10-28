@@ -36,6 +36,7 @@
   - an `AdwViewSwitcher` as the header bar's title widget;
   - an `AdwViewSwitcherBar` in the toolbar's bottom bar;
   - an `AdwBreakpoint` (`max-width: 550sp`) that hides the header switcher and reveals the bar.
+- **Group titles:** the view names the device, so its groups are titled by what they hold, as on the boards: Device, Lighting and Games on the Keyboard view; Device, Lighting, Profile and Buttons on the Mouse view. The mouse's status row and its lighting controls, once one "Mouse" group, are split into Device and Lighting.
 - **Whole-window state:** the existing status page stays for "service not running" and "no session bus" only, at the window level.
 - **Alternatives rejected:**
   - a sidebar (`AdwNavigationSplitView`), turned down by the user;
