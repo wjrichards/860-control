@@ -93,12 +93,20 @@ Boards are named as in `design-plan.md` §9. Exports are in `evidence/design/`.
 
 - [x] 5.1 Change the default size to 860 × 780 (`window.rs` `default_height`). Verify that Keyboard › Lighting opens without scrolling.
 - [x] 5.2 Check that only mapped drawings run effect loops: with Breathe on, opening the narrow list and then a page leaves one keyboard loop ticking. Use the reduced-motion frame counter in `art_area.rs`.
-- [ ] 5.3 Run `cargo clippy -- -D warnings` and `cargo test` in the GNOME SDK, all passing (the project has no rustfmt config and isn't rustfmt-formatted, so `cargo fmt` isn't part of its gate). Build the Flatpak and install it.
-- [ ] 5.4 Hands-on pass, recording screenshots in `evidence/app/`:
+- [x] 5.3 Run `cargo clippy -- -D warnings` and `cargo test` in the GNOME SDK, all passing (the project has no rustfmt config and isn't rustfmt-formatted, so `cargo fmt` isn't part of its gate). Build the Flatpak and install it.
+
+  Done 2026-10-29: clippy clean and all tests pass (55 app tests). Installed from the main checkout at `cb979f4` with the README command; the app's origin is `control1-origin`, the main checkout's cache. The extension was reinstalled for its new listed name.
+- [x] 5.4 Hands-on pass, recording screenshots in `evidence/app/`:
   - each page at 360, 860 × 780 and 1280, in dark and light;
   - unplugging and replugging each device;
   - turning animations off;
   - keyboard-only navigation through the sidebar and every page.
+
+  Done 2026-10-29 with the user on the installed app and the debug build, with these results:
+  - **Pages and sizes:** keyboard-only sidebar navigation (3.1); resizing from narrow to full width, which found and fixed the Buttons clipping and the Key Maps cut-off (5.6); screenshots in `evidence/app/`.
+  - **Light and dark:** the cards switch at once and the drawings stay readable.
+  - **Animations off:** the drawings stop and start again with Reduce Animation; the setting was back on afterwards.
+  - **Unplugging and replugging: not done on hardware.** Two attempts left no trace in the g512d log or `/dev/hidraw*`, and the user chose to rely on the fake-service checks (section hidden, move to the other device with a toast, "No Devices Connected"; screenshots in `evidence/app/`) plus the earlier changes' hardware replug tests.
 - [x] 5.5 Compare the screenshots with the boards (`penpot-design-to-code-review`), and fix any mismatches or list them in the PR.
 - [x] 5.6 **Key Maps between 550 and 1200 sp** (hands-on pass; boards `05-keymaps-688-*`, `05-keymaps-860-b-plus-a.png`, `05-keymaps-860-sidebar-open.png`):
   - fold the sidebar into an `AdwOverlaySplitView` on Key Maps, with a sidebar button in its header; Escape, the dimmed page or a row closes it;
@@ -109,4 +117,4 @@ Boards are named as in `design-plan.md` §9. Exports are in `evidence/design/`.
 ## 6. Public name
 
 - [x] 6.1 Show the public name **860 Control** (user's choice, 2026-10-29, option b): the window title and sidebar header, the `.desktop` name, comment and keywords, the metainfo name, summary ("Gaming peripheral center for GNOME") and description, the extension's listed name ("860 Control Quick Settings"), the README title and intro with the mission, and `PRODUCT.md`. The metainfo homepage and the extension's `url` point at the public repo, https://github.com/wjrichards/860-control. The app id, D-Bus names, `g512d`, the extension uuid, the binary, config paths and the repo keep `g512-control`.
-- [ ] 6.2 After installing, check that the app grid, the window and the Extensions app show "860 Control", and that the tile's "Lighting Settings" still opens the app.
+- [x] 6.2 After installing, check that the app grid, the window and the Extensions app show "860 Control", and that the tile's "Lighting Settings" still opens the app. Done 2026-10-29: the app grid, the window and the tile's Lighting Settings show 860 Control; the Extensions app picks up the new listed name at the next login.
