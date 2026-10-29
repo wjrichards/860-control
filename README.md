@@ -301,6 +301,14 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
 - **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`, and for the mouse in `openspec/changes/archive/2026-10-24-add-mouse-lighting/evidence/` (which also holds a backup of the mouse's profile memory), and for mouse profiles in `openspec/changes/archive/2026-10-24-add-mouse-dpi/evidence/`.
 - **Only the ANSI (US) layout** is drawn and addressed.
 
+## License
+
+Copyright (C) 2026 Warren Richards.
+
+860 Control is free software: the service, the app, the protocol library, the GNOME Shell tile, the scripts, and the drawings and icons are all under the GNU General Public License, version 3 or (at your option) any later version. It comes with no warranty. See [LICENSE](LICENSE) for the full terms.
+
+860 Control is not affiliated with or endorsed by Logitech. Logitech, G512 and G502 HERO are trademarks of their owners and are named only to identify the hardware it works with.
+
 ## Development
 
 ```sh

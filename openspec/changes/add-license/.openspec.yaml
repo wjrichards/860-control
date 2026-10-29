@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-29
+goal: "State the project's licence: GPL-3.0-or-later, copyright Warren Richards"
+skip_specs: true
