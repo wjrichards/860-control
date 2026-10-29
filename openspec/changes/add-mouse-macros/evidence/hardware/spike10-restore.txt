@@ -1,0 +1,17 @@
+active profile: 5
+Traceback (most recent call last):
+  File "/var/home/wrichards/Projects/Software/g512-control/.claude/worktrees/mouse-macros/openspec/changes/add-mouse-macros/evidence/hardware/spike10_write.py", line 156, in <module>
+    main()
+    ~~~~^^
+  File "/var/home/wrichards/Projects/Software/g512-control/.claude/worktrees/mouse-macros/openspec/changes/add-mouse-macros/evidence/hardware/spike10_write.py", line 138, in main
+    dev.write(s, bak[s]) if crc(bak[s][:-2]) == (bak[s][-2] << 8 | bak[s][-1]) else restore_raw(dev, s, bak[s])
+                                                                                    ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/var/home/wrichards/Projects/Software/g512-control/.claude/worktrees/mouse-macros/openspec/changes/add-mouse-macros/evidence/hardware/spike10_write.py", line 150, in restore_raw
+    dev.call(dev.slot, 8)
+    ~~~~~~~~^^^^^^^^^^^^^
+  File "/var/home/wrichards/Projects/Software/g512-control/.claude/worktrees/mouse-macros/openspec/changes/add-mouse-macros/evidence/hardware/spike10_write.py", line 45, in call
+    raise RuntimeError(f"HID++ error {rep[5]:#04x} (fn{func})")
+RuntimeError: HID++ error 0x04 (fn8)
+active profile: 5
+sector 6 now equals backup: True
+sector 5: written, read-back matches

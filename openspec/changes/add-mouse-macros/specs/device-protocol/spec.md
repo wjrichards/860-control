@@ -76,18 +76,19 @@ It SHALL change a button only by rewriting that entry and the CRC, through the v
 The system SHALL read and write macros in the format the mouse reports as macro format 1, one macro per macro sector, starting at byte 0.
 
 **A macro SHALL be, in order:**
-- at most one play-mode command: none (play once), `01` (press and release parts: the steps after it play when the button is released), `02` (repeat while held) or `03` (repeat until pressed again);
-- its steps, each three bytes:
+- at most one repeat command: none (play once), `02` (repeat while held) or `03` (repeat until pressed again);
+- its steps, each three bytes except wait-for-release:
   - `43 mm kk` / `44 mm kk`: key down / up, with modifier bits and a HID keyboard usage;
   - `41 hi lo` / `42 hi lo`: mouse button down / up, as a button bitmask;
   - `45 hi lo` / `46 hi lo`: media key down / up, as a consumer usage;
   - `40 hi lo`: pause, in milliseconds, big-endian, from 1 to 65535;
+  - `01`: wait for release, one byte: the steps after it play when the button is let go;
 - the end command `ff`.
 
 **Limits:**
 - the system SHALL refuse a macro that, with its end command, doesn't fit in the sector size less the two CRC bytes (254 bytes on the G502 HERO);
 - it SHALL NOT write the jump command (`60`), so no macro continues into another sector;
-- a play mode SHALL be offered only once it has been confirmed on the user's mouse.
+- a repeat command or step SHALL be offered only once it has been confirmed on the user's mouse (spike 10 confirmed `01`, `02`, `03` and pauses).
 
 **Reading:** a sector whose CRC is correct and whose bytes decode as above SHALL count as holding a macro. A sector that is all `ff`, or whose CRC is wrong, SHALL count as free. A sector with a correct CRC but commands the system doesn't know SHALL count as used and SHALL be kept unchanged.
 

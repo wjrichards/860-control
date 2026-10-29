@@ -33,6 +33,8 @@ pub trait Lighting {
     fn set_mouse_active_profile(&self, profile: u8) -> zbus::Result<()>;
     fn set_mouse_profile(&self, profile: u8, report_rate_ms: u8, default_index: u8, dpis: &[u16]) -> zbus::Result<()>;
     fn set_mouse_button(&self, profile: u8, button: u8, kind: &str, value: u16, modifiers: u8) -> zbus::Result<()>;
+    fn save_mouse_macro(&self, sector: u8, name: &str, mode: &str, steps: &[(String, u16, u8)]) -> zbus::Result<u8>;
+    fn delete_mouse_macro(&self, sector: u8) -> zbus::Result<()>;
 }
 
 /// The Custom effect's name on the bus.
@@ -88,12 +90,52 @@ pub struct Mouse {
     /// Each profile's buttons, by profile number; empty on a service
     /// without them.
     pub buttons: Vec<(u8, Vec<ButtonAction>)>,
+    /// The macros stored on the mouse; `None` on a service without macros.
+    pub macros: Option<Vec<MouseMacro>>,
+    /// (used, total) macro sectors; zeros when unknown.
+    pub macro_sectors: (u8, u8),
+}
+
+/// A macro stored on the mouse, as the service reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MouseMacro {
+    pub sector: u8,
+    /// Empty when the service doesn't know it (made on another computer).
+    pub name: String,
+    /// `once`, `held` or `toggle`.
+    pub mode: String,
+    pub steps: Vec<MacroStep>,
+}
+
+/// One step: `key-down`, `key-up`, `button-down`, `button-up`,
+/// `media-down`, `media-up`, `pause` (milliseconds) or `wait-release`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MacroStep {
+    pub kind: &'static str,
+    pub value: u16,
+    pub modifiers: u8,
+}
+
+impl MacroStep {
+    pub const KINDS: [&'static str; 8] =
+        ["key-down", "key-up", "button-down", "button-up", "media-down", "media-up", "pause", "wait-release"];
+
+    /// A step from the bus; an unknown kind is `None`.
+    pub fn new(kind: &str, value: u16, modifiers: u8) -> Option<MacroStep> {
+        let kind = Self::KINDS.into_iter().find(|k| *k == kind)?;
+        Some(MacroStep { kind, value, modifiers })
+    }
+
+    pub fn to_bus(self) -> (String, u16, u8) {
+        (self.kind.to_string(), self.value, self.modifiers)
+    }
 }
 
 /// What one mouse button does, as the service reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ButtonAction {
-    /// `mouse`, `key`, `media`, `special`, `disabled` or `other`.
+    /// `mouse`, `key`, `media`, `special`, `macro` (the value is the
+    /// macro's sector), `disabled` or `other`.
     pub kind: String,
     pub value: u16,
     pub modifiers: u8,
@@ -202,6 +244,18 @@ fn parse_mouse(all: &HashMap<String, OwnedValue>) -> zbus::Result<Option<Box<Mou
                 (number, actions)
             })
             .collect(),
+        macros: optional::<Vec<(u8, String, String, Vec<(String, u16, u8)>)>>(all, "MouseMacros")?.map(|macros| {
+            macros
+                .into_iter()
+                .map(|(sector, name, mode, steps)| MouseMacro {
+                    sector,
+                    name,
+                    mode,
+                    steps: steps.iter().filter_map(|(kind, value, modifiers)| MacroStep::new(kind, *value, *modifiers)).collect(),
+                })
+                .collect()
+        }),
+        macro_sectors: optional(all, "MouseMacroSectors")?.unwrap_or((0, 0)),
     })))
 }
 
@@ -231,6 +285,26 @@ fn parse_effects(v: OwnedValue) -> zbus::Result<Vec<EffectInfo>> {
 fn parse_state(v: OwnedValue) -> zbus::Result<LightingState> {
     let (effect, color, speed, brightness): (String, (u8, u8, u8), u8, u8) = v.try_into()?;
     Ok(LightingState { effect, color, speed, brightness })
+}
+
+/// A macro save that failed for a reason the editor explains in a banner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacroProblem {
+    TooLong,
+    MemoryFull,
+    WriteFailed,
+}
+
+/// Which macro problem a D-Bus error is, from its name; `None` for any
+/// other error.
+pub fn macro_problem(e: &zbus::Error) -> Option<MacroProblem> {
+    let zbus::Error::MethodError(name, _, _) = e else { return None };
+    match name.as_str() {
+        "io.github.g512control.Error.MacroTooLong" => Some(MacroProblem::TooLong),
+        "io.github.g512control.Error.MacroMemoryFull" => Some(MacroProblem::MemoryFull),
+        "io.github.g512control.Error.WriteFailed" => Some(MacroProblem::WriteFailed),
+        _ => None,
+    }
 }
 
 /// The human part of a D-Bus error, e.g. "brightness 150 is outside 0..=100".
@@ -275,6 +349,21 @@ mod tests {
         assert_eq!((mouse.state.as_str(), mouse.name.as_str()), ("connected", "G502 HERO Gaming Mouse"));
         assert_eq!(mouse.lighting.color, (38, 162, 105));
         assert!(mouse.profiles.is_empty() && mouse.buttons.is_empty(), "optional members default to empty");
+        assert_eq!((mouse.macros, mouse.macro_sectors), (None, (0, 0)), "a service without macros");
+    }
+
+    #[test]
+    fn macros_are_read() {
+        let mut entries = vec![("DeviceState", Value::from("disconnected"))];
+        entries.extend(mouse_props());
+        let steps = vec![("key-down".to_string(), 0x4au16, 0u8), ("pause".to_string(), 50, 0), ("jump".to_string(), 6, 0)];
+        entries.push(("MouseMacros", Value::from(vec![(6u8, "Copy line".to_string(), "once".to_string(), steps)])));
+        entries.push(("MouseMacroSectors", Value::from((1u8, 10u8))));
+        let mouse = parse_snapshot(&props(entries)).unwrap().mouse.unwrap();
+        let macros = mouse.macros.unwrap();
+        assert_eq!((macros[0].sector, macros[0].name.as_str(), macros[0].mode.as_str()), (6, "Copy line", "once"));
+        assert_eq!(macros[0].steps, [MacroStep::new("key-down", 0x4a, 0).unwrap(), MacroStep::new("pause", 50, 0).unwrap()]);
+        assert_eq!(mouse.macro_sectors, (1, 10));
     }
 
     #[test]

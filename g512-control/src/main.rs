@@ -12,6 +12,9 @@ mod editor;
 mod key_grid;
 mod keyboard_art;
 mod layout;
+mod macro_editor;
+mod macro_steps;
+mod macros_page;
 mod mouse_art;
 mod mouse_ink;
 mod motion;
@@ -29,6 +32,7 @@ use gtk::{gio, glib};
 const APP_ID: &str = "io.github.g512control.Control";
 
 fn main() -> glib::ExitCode {
+    gio::resources_register_include!("resources.gresource").expect("the app's resources are built in");
     let app = adw::Application::builder().application_id(APP_ID).build();
     // A screenshot run (see `window::debug_screenshot`) gets its own window
     // even while the installed app is open.

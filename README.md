@@ -2,7 +2,7 @@
 
 A gaming peripheral center for GNOME desktops. Its goal is to bridge some of the gap between what the system supports and what the hardware can do.
 
-> **Alpha software.** It works day to day on the author's own devices, but expect rough edges and changes between versions. It writes lighting to the devices' RAM and mouse profiles to the mouse's flash, after saving a backup; read [Things to know](#things-to-know) before using it.
+> **Alpha software.** It works day to day on the author's own devices, but expect rough edges and changes between versions. It writes lighting to the devices' RAM, and mouse profiles and macros to the mouse's flash, after saving a backup; read [Things to know](#things-to-know) before using it.
 
 Today it covers the Logitech G512 RGB keyboard (USB `046d:c33c`) and G502 HERO mouse (`046d:c08b`). The code, packages, app id and D-Bus names keep the project's original name, `g512-control`.
 
@@ -19,7 +19,7 @@ Effects: Off, Static, Breathe, Colour cycle, Wave, Ripple and Custom. Each has t
 
 Custom shows a key map: a colour for each key, set in the app's **Key Maps** page. A second map, Gaming, can be shown automatically while a game runs.
 
-The mouse's logo and DPI strip can match the keyboard, or have their own Off, Static, Breathe or Cycle.
+The mouse's logo and DPI strip can match the keyboard, or have their own Off, Static, Breathe or Cycle. Its buttons can be remapped, and can play macros stored on the mouse itself.
 
 Tested on firmware U1 19.01 build 0014, Fedora Silverblue 44 and GNOME 50.
 
@@ -83,7 +83,7 @@ The tile hides itself while `g512d` isn't running, and never starts it. After a 
 
 The app has a sidebar like GNOME Settings, with a section for each device it finds:
 - **Keyboard:** Lighting, Key Maps and Games.
-- **Mouse:** Lighting, DPI & Profiles and Buttons. It appears when the service supports a G502 HERO.
+- **Mouse:** Lighting, DPI & Profiles, Buttons and Macros. It appears when the service supports a G502 HERO.
 
 | | |
 |---|---|
@@ -93,6 +93,8 @@ The app has a sidebar like GNOME Settings, with a section for each device it fin
 | **Mouse › Buttons** | **Mouse › DPI & Profiles** |
 | ![Mouse Lighting: the mouse drawn in the keyboard's colour, with Match Keyboard on](docs/screenshots/mouse-lighting.png) | ![The keyboard's Lighting page in the light style, on a light drawing card](docs/screenshots/light.png) |
 | **Mouse › Lighting** | **Light style** |
+| ![Macros: the macros stored on the mouse, each with its step count, how it plays and which button uses it, and a meter of the mouse's ten macro slots](docs/screenshots/mouse-macros.png) | ![The macro editor: the Copy line macro's name, play mode and steps (Home, a pause, Shift+End, a pause, Ctrl+C), with Record and Add Step](docs/screenshots/macro-editor.png) |
+| **Mouse › Macros** | **Macro editor** |
 
 A device's section is there only while the device is plugged in. Unplug the mouse while one of its pages is open and the app moves to the keyboard's Lighting page and says "Mouse disconnected"; with neither device plugged in, the window says **No Devices Connected**. A device that is plugged in but can't be used (no access, or unsupported) keeps its section, and its pages explain why.
 
@@ -156,13 +158,28 @@ Only the report rate, DPI steps and default step are changed here. Button assign
 The **Buttons** page lists what each button does in the active profile, numbered to match the drawing: Left Click, Right Click, Wheel Click, Wheel Tilt Left and Right, G9, DPI Up, DPI Down, Sniper, and Back and Forward (the thumb buttons). A button in that list, or the button itself on the drawing, opens a dialog with:
 - **Mouse Button:** left, right or middle click, back or forward;
 - **Keyboard Shortcut:** choose **Set Shortcut**, then press the keys, for example Ctrl+C. Esc cancels. Letters, digits, F1 to F12, Enter, Tab, Space, Backspace, punctuation, the arrows and Insert, Delete, Home, End, Page Up and Page Down work; the dialog says when a key can't be used;
+- **Macro:** one of the macros stored on the mouse, or **New Macro…** to record one (see [Macros](#macros));
 - **Media Key:** play/pause, next and previous track, volume up and down, mute;
 - **Mouse Function:** DPI up, down, cycle and shift (sniper), next profile, scroll left and right, G-shift;
 - **Disabled:** the button does nothing.
 
-**Left click** can't be changed, so the mouse can always click. Each change is written to the mouse straight away, behind the same backup as the profiles, and works on other computers too. A button set by another program, such as a macro, shows as "Set elsewhere" and is kept until you change it.
+**Left click** can't be changed, so the mouse can always click. Each change is written to the mouse straight away, behind the same backup as the profiles, and works on other computers too. A button that plays a macro reads "Macro: Copy line". One set by another program in a way this app doesn't understand shows as "Set elsewhere" and is kept until you change it.
 
 If G9 no longer switches profiles, the app's **Profile** row still does.
+
+### Macros
+
+A macro is a run of key presses, mouse clicks, media keys and pauses that one button plays. It's stored in the mouse's own memory, so it works on other computers and with the app closed. The mouse has room for **ten macros**, one per slot, each about 40 key presses long.
+
+The **Macros** page lists them, with how many steps each has, how it plays and which buttons use it, and how many slots are used. **New Macro**, or a row, opens the editor:
+- **Record** listens to the keys you press in the editor, keeping the pauses between them, until **Stop**. Mouse clicks aren't recorded; add them with **Add Step**.
+- Each step can be dragged to a new place (or moved with its handle's menu), deleted, or changed: click a key to press a new one, or set a pause in milliseconds.
+- **Add Step** adds a key, a mouse button, a media key or a pause.
+- **Plays:** once, repeating while the button is held, or repeating until the button is pressed again.
+- The editor shows how much of its slot the macro uses, and won't save one that's too long.
+- **Delete Macro** first sets every button that plays it, in every profile, to do nothing.
+
+Then choose the macro for a button in the Buttons page's dialog. The mouse doesn't store names, so the app keeps them; a macro made on another computer shows as "Macro in slot N".
 
 ## Key maps
 
@@ -266,15 +283,24 @@ busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighti
 - `key`: a HID keyboard usage, with modifier bits Ctrl 1, Shift 2, Alt 4, Super 8;
 - `media`: a HID consumer usage, such as `0xcd` play/pause or `0xe9` volume up;
 - `special`: 1 scroll left, 2 scroll right, 3 DPI up, 4 DPI down, 5 DPI cycle, 7 DPI shift, 10 next profile, 11 G-shift;
+- `macro`: the macro's slot (sector 6 to 15, from `MouseMacros`);
 - `disabled`, with value 0.
 
-Modifiers go only with `key`. `MouseButtons` lists every profile's buttons the same way; `other` marks an entry the service doesn't write, such as a macro.
+Modifiers go only with `key`. `MouseButtons` lists every profile's buttons the same way; `other` marks an entry the service doesn't write.
+
+```sh
+# A macro typing "ab", played once; the call returns its slot
+busctl --user call io.github.g512control.Lighting1 /io/github/g512control/Lighting1 \
+    io.github.g512control.Lighting1 SaveMouseMacro 'yssa(sqy)' 0 "ab" once 4 key-down 4 0 key-up 4 0 key-down 5 0 key-up 5 0
+```
+
+`SaveMouseMacro(slot, name, mode, steps)` saves a new macro when the slot is 0, or a new version of the one in that slot. Modes are `once`, `held` and `toggle`. Steps are (kind, value, modifiers): `key-down` and `key-up` (HID usage and modifier bits), `button-down` and `button-up` (mouse buttons), `media-down` and `media-up` (consumer usage), `pause` (milliseconds) and `wait-release` (0). `MouseMacros` lists the macros, `MouseMacroSectors` how many slots are used of how many. `DeleteMouseMacro(slot)` sets the buttons that play it to disabled, then frees the slot. The errors `io.github.g512control.Error.MacroTooLong`, `.MacroMemoryFull` and `.WriteFailed` say why a save failed.
 
 `SetKeys(map, [(key, r, g, b)...])` replaces the whole `custom` or `gaming` map. Keys not listed are off. The maps are in the `CustomKeys` and `GamingKeys` properties, the switch in `GameSwitch`. `GameActive` is true while the Gaming map is showing because a game is running. `LightsOn` is false while the keyboard is dark.
 
 `MouseState`, `MouseName` and `MouseEffects` describe the mouse. `MouseMatch` is true while it follows the keyboard, and `MouseLighting` is its own setting. `SetMouseLighting` takes the same arguments as `SetState`. It turns matching off and the lights on.
 
-The saved state, both maps, the game switch, the lights setting and the mouse settings are in `~/.config/g512-control/state.toml`.
+The saved state, both maps, the game switch, the lights setting, the mouse settings and the macros' names are in `~/.config/g512-control/state.toml`.
 
 ## Uninstall
 
@@ -285,7 +311,7 @@ packaging/install-service.sh --uninstall
 sudo rm /etc/udev/rules.d/70-g512-control.rules && sudo udevadm control --reload
 ```
 
-Nothing is stored on the keyboard. It returns to its own default lighting the next time it is plugged in.
+Nothing is stored on the keyboard. It returns to its own default lighting the next time it is plugged in. Profile, button and macro changes stay on the mouse; to undo them, run `g512d --restore-mouse-profiles` with each backup file before uninstalling the service.
 
 ## Things to know
 
@@ -296,7 +322,9 @@ Nothing is stored on the keyboard. It returns to its own default lighting the ne
   - OnboardProfiles: never "set mode", so the mouse always stays in onboard mode.
 
   Both devices also have firmware-update, reset and hidden engineering features, which the code cannot address.
-- **Profile writes go to the mouse's flash memory.** Only the five user profile sectors can be written, never the profile directory or the factory profiles. Every write is read back and checked. Flash wears with writes, so edits are grouped into one write per pause; scripts calling `SetMouseProfile` in a loop are not limited.
+- **Profile and macro writes go to the mouse's flash memory.** Only the five user profile sectors and the ten macro sectors (6 to 15) can be written, never the profile directory or the factory profiles. Every write is read back and checked. Flash wears with writes, so profile edits are grouped into one write per pause; scripts calling `SetMouseProfile` in a loop are not limited.
+- **Backups:** before its first profile write the service saves the directory and profiles to `~/.config/g512-control/mouse-profiles-backup.txt`, and before its first macro write the macro sectors to `mouse-macros-backup.txt`. Neither file is ever overwritten. `g512d --restore-mouse-profiles FILE` writes either one back.
+- **Macros are new and alpha.** The macro format was confirmed on the author's mouse by hand (`openspec/changes/add-mouse-macros/evidence/hardware.md`); other G502 HERO firmware hasn't been tried.
 - **Lighting is written to the devices' RAM only,** never to their stored settings.
 - **Speed ranges and command layouts** were confirmed on the keyboard by hand. The tests and their output are in `openspec/changes/archive/2026-10-22-add-g512-lighting-controller/evidence/`, for per-key lighting in `openspec/changes/archive/2026-10-23-add-per-key-lighting/evidence/`, for the tile in `openspec/changes/archive/2026-10-23-add-quick-settings-tile/evidence/`, and for the mouse in `openspec/changes/archive/2026-10-24-add-mouse-lighting/evidence/` (which also holds a backup of the mouse's profile memory), and for mouse profiles in `openspec/changes/archive/2026-10-24-add-mouse-dpi/evidence/`.
 - **Only the ANSI (US) layout** is drawn and addressed.
@@ -335,4 +363,4 @@ flatpak run --filesystem="$PWD" --talk-name=io.github.g512control.Lighting1Test 
     --command="$PWD/target/flatpak/debug/g512-control" io.github.g512control.Control
 ```
 
-`G512_CONTROL_VIEW` takes a page tag (`keyboard-lighting`, `keymaps`, `games`, `mouse-lighting`, `dpi`, `buttons`) or `list`; `G512_CONTROL_STYLE=light` forces the light style. The rainbow Custom map was set on the fake service with its `io.github.g512control.Test.Set` method.
+`G512_CONTROL_VIEW` takes a page tag (`keyboard-lighting`, `keymaps`, `games`, `mouse-lighting`, `dpi`, `buttons`, `macros`) or `list`; `G512_CONTROL_STYLE=light` forces the light style. `G512_CONTROL_BUTTON=8` opens G9's Change dialog, and `G512_CONTROL_MACRO=new` (or a slot, with `G512_CONTROL_MACRO_STATE=recording`, `write-failed` or `delete`) opens the macro editor. The rainbow Custom map was set on the fake service with its `io.github.g512control.Test.Set` method.

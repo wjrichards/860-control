@@ -82,8 +82,8 @@ Before the first write, it SHALL make sure the profile backup exists, as for pro
 When the mouse's profiles are readable, the service SHALL read its macro sectors and offer each macro it holds, with:
 - its sector;
 - its name, or an empty name when the service doesn't know it;
-- its play mode (`once`, `release`, `held` or `toggle`);
-- its steps, each as a kind (`key-down`, `key-up`, `button-down`, `button-up`, `media-down`, `media-up` or `pause`), a value (usage, mask or milliseconds) and modifier bits.
+- its play mode (`once`, `held` or `toggle`);
+- its steps, each as a kind (`key-down`, `key-up`, `button-down`, `button-up`, `media-down`, `media-up`, `pause` or `wait-release`), a value (usage, mask or milliseconds; 0 for `wait-release`) and modifier bits.
 
 It SHALL also offer how many macro sectors are used and how many there are.
 

@@ -1,0 +1,17 @@
+active profile: 5
+macro: 43 00 04 44 00 04 43 00 05 44 00 05 ff
+sector 6: written, read-back matches
+profile 5 entry 8 was 90 0a ff ff
+sector 5: written, read-back matches
+active profile: 5
+macro: 43 00 04 44 00 04 40 07 d0 43 00 05 44 00 05 ff
+sector 6: written, read-back matches
+active profile: 5
+macro: 43 00 04 44 00 04 01 43 00 05 44 00 05 ff
+sector 6: written, read-back matches
+active profile: 5
+macro: 02 43 00 04 44 00 04 43 00 05 44 00 05 ff
+sector 6: written, read-back matches
+active profile: 5
+macro: 03 43 00 04 44 00 04 43 00 05 44 00 05 ff
+sector 6: written, read-back matches
