@@ -18,6 +18,7 @@
       settings after replugs and suspend.
     </p>
   </description>
+  <url type="homepage">https://github.com/wjrichards/860-control</url>
   <developer id="io.github.g512control">
     <name>wrichards</name>
   </developer>

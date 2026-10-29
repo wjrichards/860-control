@@ -108,5 +108,5 @@ Boards are named as in `design-plan.md` §9. Exports are in `evidence/design/`.
 
 ## 6. Public name
 
-- [x] 6.1 Show the public name **860 Control** (user's choice, 2026-10-29, option b): the window title and sidebar header, the `.desktop` name, comment and keywords, the metainfo name, summary ("Gaming peripheral center for GNOME") and description, the extension's listed name ("860 Control Quick Settings"), the README title and intro with the mission, and `PRODUCT.md`. The app id, D-Bus names, `g512d`, the extension uuid, the binary, config paths and the repo keep `g512-control`.
+- [x] 6.1 Show the public name **860 Control** (user's choice, 2026-10-29, option b): the window title and sidebar header, the `.desktop` name, comment and keywords, the metainfo name, summary ("Gaming peripheral center for GNOME") and description, the extension's listed name ("860 Control Quick Settings"), the README title and intro with the mission, and `PRODUCT.md`. The metainfo homepage and the extension's `url` point at the public repo, https://github.com/wjrichards/860-control. The app id, D-Bus names, `g512d`, the extension uuid, the binary, config paths and the repo keep `g512-control`.
 - [ ] 6.2 After installing, check that the app grid, the window and the Extensions app show "860 Control", and that the tile's "Lighting Settings" still opens the app.
