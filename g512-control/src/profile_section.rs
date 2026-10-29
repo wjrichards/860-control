@@ -1,5 +1,5 @@
-//! The Mouse view's Profile group: which onboard profile is active, and its report
-//! rate and DPI steps. Edits are written to the mouse once the user has
+//! The Mouse › DPI & Profiles page's groups: which onboard profile is active
+//! and its report rate ("Profile"), and its DPI steps ("DPI Steps"). Edits are written to the mouse once the user has
 //! stopped changing them for [`SAVE_DELAY`], as one request.
 //!
 //! All five step rows are built once and shown or hidden as the profile
@@ -32,6 +32,7 @@ struct StepRow {
 
 pub struct ProfileSection {
     pub group: adw::PreferencesGroup,
+    pub steps_group: adw::PreferencesGroup,
     profile_row: adw::ComboRow,
     profile_names: gtk::StringList,
     rate_row: adw::ComboRow,
@@ -54,13 +55,15 @@ impl ProfileSection {
         let rate_row =
             adw::ComboRow::builder().title("Report Rate").model(&gtk::StringList::new(&rate_names)).build();
         let add_row = adw::ButtonRow::builder().title("Add Step").start_icon_name("list-add-symbolic").build();
-        let group = adw::PreferencesGroup::builder()
-            .title("Profile")
-            .description("Stored on the mouse: its DPI buttons cycle through these steps")
-            .visible(false)
-            .build();
+        let group =
+            adw::PreferencesGroup::builder().title("Profile").description("Stored on the mouse").visible(false).build();
         group.add(&profile_row);
         group.add(&rate_row);
+        let steps_group = adw::PreferencesGroup::builder()
+            .title("DPI Steps")
+            .description("The DPI buttons cycle through these steps. The selected one is the default.")
+            .visible(false)
+            .build();
 
         let mut first: Option<gtk::CheckButton> = None;
         let steps: Vec<StepRow> = (1..=MAX_STEPS)
@@ -82,14 +85,15 @@ impl ProfileSection {
                 remove.update_property(&[gtk::accessible::Property::Label(&format!("Remove Step {n}"))]);
                 row.add_prefix(&default);
                 row.add_suffix(&remove);
-                group.add(&row);
+                steps_group.add(&row);
                 StepRow { row, default, remove }
             })
             .collect();
-        group.add(&add_row);
+        steps_group.add(&add_row);
 
         let section = Rc::new(ProfileSection {
             group,
+            steps_group,
             profile_row,
             profile_names,
             rate_row,
@@ -165,6 +169,7 @@ impl ProfileSection {
     pub fn show(&self, mouse: Option<&Mouse>) {
         let profiles = mouse.filter(|m| m.state == "connected").map_or(&[][..], |m| m.profiles.as_slice());
         self.group.set_visible(!profiles.is_empty());
+        self.steps_group.set_visible(!profiles.is_empty());
         let Some(m) = mouse.filter(|_| !profiles.is_empty()) else { return };
         if self.pending.borrow().is_some() {
             return;

@@ -1,5 +1,6 @@
-//! The key-map editor page: the drawn keyboard, selection, painting, and
-//! which map (Custom or Gaming) is being edited.
+//! The Keyboard › Key Maps page: the drawn keyboard on a card that takes the
+//! page's free height, selection, painting, and which map (Custom or Gaming)
+//! is being edited.
 
 use std::{
     cell::{Cell, RefCell},
@@ -11,14 +12,10 @@ use adw::prelude::*;
 use gtk::gdk;
 
 use crate::{
+    key_grid::KeyGrid,
     layout::{self, GROUPS, KEYS},
     service::Keys,
 };
-
-/// Pixels per key.
-const UNIT: f64 = 34.0;
-/// Space between drawn keys, in pixels.
-const GAP: i32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapName {
@@ -82,13 +79,32 @@ pub fn color_name((r, g, b): (u8, u8, u8)) -> String {
     if max < 0.55 && base != "grey" { format!("dim {base}") } else { base.into() }
 }
 
+/// The hint under the keys, with how many are selected. `scrolls`: the
+/// window is too narrow for the whole grid, which scrolls sideways.
+fn selection_hint(selected: usize, scrolls: bool) -> String {
+    let keys = if selected == 1 { "key" } else { "keys" };
+    let how = if scrolls {
+        "Scroll sideways to reach the rest of the keyboard."
+    } else {
+        "Click keys to select them, or drag across several."
+    };
+    format!("{how} {selected} {keys} selected.")
+}
+
 pub struct Editor {
-    pub page: adw::NavigationPage,
+    /// The page's content, for the Key Maps page.
+    pub widget: gtk::Box,
     custom_toggle: gtk::ToggleButton,
     gaming_toggle: gtk::ToggleButton,
     /// (usage, button, spoken key name), in layout order.
     keys: Vec<(u8, gtk::ToggleButton, &'static str)>,
     color_button: gtk::ColorDialogButton,
+    hint: gtk::Label,
+    grid: KeyGrid,
+    /// The grid's sideways scrolling, for the hint.
+    scroll: gtk::Adjustment,
+    /// "Shown while a game runs: Gaming", left out of a narrow window.
+    shown_note: gtk::Label,
     css: gtk::CssProvider,
     custom: RefCell<Map>,
     gaming: RefCell<Map>,
@@ -104,30 +120,35 @@ impl Editor {
 
         let custom_toggle = gtk::ToggleButton::builder().label("Custom").active(true).build();
         let gaming_toggle = gtk::ToggleButton::builder().label("Gaming").group(&custom_toggle).build();
-        let target = gtk::Box::builder().css_classes(["linked"]).halign(gtk::Align::Center).build();
+        let target = gtk::Box::builder().css_classes(["linked"]).build();
         target.append(&custom_toggle);
         target.append(&gaming_toggle);
         target.update_property(&[gtk::accessible::Property::Label("Map being edited")]);
+        let editing = gtk::Label::builder().label("Editing").css_classes(["dim-label"]).build();
+        let shown = gtk::Label::builder()
+            .label("Shown while a game runs: Gaming")
+            .hexpand(true)
+            .xalign(1.0)
+            .wrap(true)
+            .css_classes(["dim-label", "caption"])
+            .build();
+        let top = gtk::Box::builder().spacing(12).build();
+        top.append(&editing);
+        top.append(&target);
+        top.append(&shown);
 
         let groups = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .max_children_per_line(8)
-            .column_spacing(6)
-            .row_spacing(6)
+            .column_spacing(8)
+            .row_spacing(8)
             .homogeneous(false)
-            .halign(gtk::Align::Center)
+            .halign(gtk::Align::Start)
             .build();
 
-        let fixed = gtk::Fixed::new();
-        fixed.add_css_class("keygrid");
-        fixed.set_size_request(
-            (f64::from(layout::WIDTH) / 4.0 * UNIT) as i32,
-            (f64::from(layout::HEIGHT) / 4.0 * UNIT) as i32,
-        );
+        let grid = KeyGrid::new();
         let mut keys = Vec::new();
         for key in KEYS {
-            let px = |q: u16| f64::from(q) / 4.0 * UNIT;
-            let (w, h) = (px(key.w) as i32 - GAP, px(key.h) as i32 - GAP);
             let widget: gtk::Widget = match key.usage {
                 Some(usage) => {
                     let button = gtk::ToggleButton::builder()
@@ -146,55 +167,70 @@ impl Editor {
                     label.upcast()
                 }
             };
-            widget.set_size_request(w, h);
-            fixed.put(&widget, px(key.x), px(key.y));
+            grid.put(&widget, (key.x, key.y, key.w, key.h));
         }
+        // The keys shrink to fit the width down to a floor (`set_floor`);
+        // below it, and in a narrow window, the grid scrolls sideways.
         let scroller = gtk::ScrolledWindow::builder()
-            .child(&fixed)
+            .child(&grid)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_width(true)
             .propagate_natural_height(true)
             .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .vexpand(true)
             .build();
+        let hint = gtk::Label::builder().label(selection_hint(0, false)).wrap(true).css_classes(["dim-label", "caption"]).build();
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(16)
+            .vexpand(true)
+            .css_classes(["drawing-card"])
+            .build();
+        card.append(&scroller);
+        card.append(&hint);
 
         let color_button = gtk::ColorDialogButton::new(Some(
             gtk::ColorDialog::builder().title("Key Colour").with_alpha(false).build(),
         ));
         color_button.set_rgba(&gdk::RGBA::new(1.0, 0.125, 0.0, 1.0));
         color_button.update_property(&[gtk::accessible::Property::Label("Paint colour")]);
+        // Keeps its swatch size where the actions wrap.
+        color_button.set_halign(gtk::Align::Start);
         let paint = gtk::Button::builder().label("Paint Selected").css_classes(["suggested-action"]).build();
         let off = gtk::Button::builder().label("Turn Off").build();
         let clear = gtk::Button::builder().label("Clear Selection").build();
-        let actions = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).build();
+        // Wraps onto more lines in a narrow window.
+        let actions = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .max_children_per_line(4)
+            .column_spacing(8)
+            .row_spacing(8)
+            .halign(gtk::Align::Start)
+            .build();
         actions.append(&color_button);
         actions.append(&paint);
         actions.append(&off);
         actions.append(&clear);
 
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(18)
-            .margin_bottom(18)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        content.append(&target);
-        content.append(&groups);
-        content.append(&scroller);
-        content.append(&actions);
-
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(&gtk::ScrolledWindow::builder().child(&content).build()));
-        let page = adw::NavigationPage::builder().title("Key Maps").tag("keymaps").child(&toolbar).build();
+        let select = gtk::Label::builder().label("Select").xalign(0.0).css_classes(["heading"]).build();
+        let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).vexpand(true).build();
+        widget.append(&top);
+        widget.append(&card);
+        widget.append(&select);
+        widget.append(&groups);
+        widget.append(&actions);
 
         let editor = Rc::new(Editor {
-            page,
+            widget,
             custom_toggle,
             gaming_toggle,
             keys,
             color_button,
+            hint,
+            grid: grid.clone(),
+            scroll: scroller.hadjustment(),
+            shown_note: shown.clone(),
             css,
             custom: RefCell::new(Map::new()),
             gaming: RefCell::new(Map::new()),
@@ -241,9 +277,47 @@ impl Editor {
                 }
             });
         }
-        editor.connect_drag_select(&fixed);
+        for (_, button, _) in &editor.keys {
+            let w = Rc::downgrade(&editor);
+            button.connect_toggled(move |_| {
+                if let Some(e) = w.upgrade() {
+                    e.update_hint();
+                }
+            });
+        }
+        for property in ["upper", "page-size"] {
+            let w = Rc::downgrade(&editor);
+            editor.scroll.connect_notify_local(Some(property), move |_, _| {
+                if let Some(e) = w.upgrade() {
+                    e.update_hint();
+                }
+            });
+        }
+        editor.connect_drag_select(&grid);
         editor.redraw();
         editor
+    }
+
+    /// In a narrow window the note beside the Editing toggle would wrap onto
+    /// several lines, so it's left out. (Wider, Key Maps has the sidebar
+    /// folded away, which leaves room.)
+    pub fn set_compact(&self, compact: bool) {
+        self.shown_note.set_visible(!compact);
+    }
+
+    /// The least scale the keys shrink to before the grid scrolls: 1.0 in a
+    /// narrow window, where the keys keep their size.
+    pub fn set_key_floor(&self, floor: f64) {
+        self.grid.set_floor(floor);
+    }
+
+    fn update_hint(&self) {
+        let selected = self.keys.iter().filter(|(_, b, _)| b.is_active()).count();
+        let scrolls = self.scroll.upper() > self.scroll.page_size() + 0.5;
+        let text = selection_hint(selected, scrolls);
+        if self.hint.label() != text {
+            self.hint.set_label(&text);
+        }
     }
 
     /// Called with each whole-map edit, to send to the service.
@@ -315,7 +389,7 @@ impl Editor {
         let map = self.map().borrow();
         let mut css = String::from(
             ".keygrid button.key { padding: 0; min-height: 0; min-width: 0; border-radius: 6px; font-size: 0.8em; }\n\
-             .keygrid button.key:checked { outline: 3px solid @accent_color; outline-offset: -3px; }\n\
+             .keygrid button.key:checked { outline: 3px solid white; outline-offset: -3px; box-shadow: inset 0 0 0 4px rgb(0 0 0 / 60%); }\n\
              .keygrid .key-fixed { font-size: 0.8em; }\n",
         );
         for (usage, button, name) in &self.keys {
@@ -334,23 +408,28 @@ impl Editor {
     }
 
     /// Dragging across keys selects every key passed over.
-    fn connect_drag_select(self: &Rc<Self>, fixed: &gtk::Fixed) {
+    fn connect_drag_select(self: &Rc<Self>, grid: &KeyGrid) {
         let drag = gtk::GestureDrag::new();
         drag.set_propagation_phase(gtk::PropagationPhase::Capture);
         let start: Rc<Cell<DragStart>> = Rc::new(Cell::new(None));
         let active = Rc::new(Cell::new(false));
-        let to_quarters = |px: f64| px / UNIT * 4.0;
         {
-            let (start, active) = (start.clone(), active.clone());
+            let (start, active, grid) = (start.clone(), active.clone(), grid.downgrade());
             drag.connect_drag_begin(move |_, x, y| {
-                start.set(Some((x, y, layout::key_at(to_quarters(x), to_quarters(y)))));
+                let Some(grid) = grid.upgrade() else { return };
+                let (qx, qy) = grid.to_quarters(x, y);
+                start.set(Some((x, y, layout::key_at(qx, qy))));
                 active.set(false);
             });
         }
+        let grid_weak = grid.downgrade();
         let w = Rc::downgrade(self);
         drag.connect_drag_update(move |gesture, dx, dy| {
-            let (Some(editor), Some((x, y, first))) = (w.upgrade(), start.get()) else { return };
-            let here = layout::key_at(to_quarters(x + dx), to_quarters(y + dy));
+            let (Some(editor), Some(grid), Some((x, y, first))) = (w.upgrade(), grid_weak.upgrade(), start.get()) else {
+                return;
+            };
+            let (qx, qy) = grid.to_quarters(x + dx, y + dy);
+            let here = layout::key_at(qx, qy);
             if !active.get() {
                 if here == first {
                     return; // still on the first key: leave it to the button's own click
@@ -366,7 +445,7 @@ impl Editor {
                 editor.select(&[u]);
             }
         });
-        fixed.add_controller(drag);
+        grid.add_controller(drag);
     }
 }
 
@@ -393,6 +472,14 @@ mod tests {
         assert_eq!(color_name((0, 255, 0)), "green");
         assert_eq!(color_name((0, 0, 255)), "blue");
         assert_eq!(color_name((0x80, 0, 0)), "dim red");
+    }
+
+    #[test]
+    fn selection_hint_counts() {
+        assert!(selection_hint(0, false).ends_with("0 keys selected."));
+        assert!(selection_hint(1, false).ends_with("1 key selected."));
+        assert!(selection_hint(4, true).ends_with("4 keys selected."));
+        assert!(selection_hint(4, true).starts_with("Scroll sideways"));
     }
 
     #[test]

@@ -1,20 +1,23 @@
-//! The mouse illustration at the top of the Mouse view: the user's G502
-//! HERO ink drawings, top view and 3/4 side view, in the lighting colour,
-//! with the DPI LEDs and G logo lit and glowing, and a numbered badge on
-//! each programmable button, in a card with the callouts. Clicking a button
-//! on the drawing reports it like its callout.
+//! The mouse illustration on the Mouse pages and the narrow sidebar list:
+//! the user's G502 HERO ink drawings, the top view stacked above the side
+//! view, lit by layer (the outlines in the lighting colour, the DPI LEDs and
+//! the logo solid), on a card that takes the page's free height.
 //!
-//! Breathe and Cycle play on the LEDs, logo and glow while animations are
-//! on. Hovering a button, or its callout, fills it and sends a ring out
-//! once; applying a change gives it a confirm pulse.
+//! On the Buttons page it numbers every programmable button and lists them
+//! as callouts; clicking a button on the drawing reports it like its
+//! callout. On DPI & Profiles it numbers only the buttons named there.
+//!
+//! Breathe and Cycle play on the LEDs and logo while animations are on.
+//! Hovering a button, or its callout, fills it and sends a ring out once;
+//! applying a change gives it a confirm pulse.
 
 use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 
 use crate::{
-    art::{self, CARD, Rgb, Shown},
-    art_area::{ArtArea, Ticker, rounded_rect, set_rgb},
+    art::{self, Rgb, Shown},
+    art_area::{ArtArea, Ticker, is_dark, rounded_rect, set_rgb},
     callouts::Callouts,
     change_dialog::Handler,
     editor::color_name,
@@ -23,13 +26,13 @@ use crate::{
     service::ButtonAction,
 };
 
-/// The compact board's layout, in its own pixels: the top view 300 px tall
-/// at (16, 20), the side view 270 px wide at (196, 46).
-const AREA_W: f64 = 482.0;
-const AREA_H: f64 = 340.0;
-const TOP_AT: (f64, f64) = (16.0, 20.0);
+/// The stacked layout (the `G502 drawing` board), in its own units: the top
+/// view 300 tall at (61.9, 8), the side view 270 wide at (10, 320) below it.
+const AREA_W: f64 = 290.0;
+const AREA_H: f64 = 420.0;
+const TOP_AT: (f64, f64) = (61.9, 8.0);
 const TOP_H: f64 = 300.0;
-const SIDE_AT: (f64, f64) = (196.0, 46.0);
+const SIDE_AT: (f64, f64) = (10.0, 320.0);
 const SIDE_W: f64 = 270.0;
 const BADGE_R: f64 = 8.0;
 /// Badges: `color.accent-strong` (#1D8092), white numbers at 4.61:1.
@@ -86,9 +89,53 @@ fn badge_centre(spot: &Hotspot, top: &Ink, side: &Ink) -> (f64, f64) {
     (ox + (x + w / 2.0) * s, oy + (y + h / 2.0) * s)
 }
 
-/// The button under a point in the area's own pixels.
-pub fn hit(x: f64, y: f64, top: &Ink, side: &Ink) -> Option<&'static Hotspot> {
-    HOTSPOTS.iter().find(|spot| {
+/// Which buttons the drawing numbers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Badges {
+    /// None: the Lighting page and the sidebar list.
+    #[default]
+    None,
+    /// Only these badges (DPI & Profiles: 6 to 9).
+    Only(&'static [u8]),
+    /// Every button, with the callouts (the Buttons page).
+    All,
+}
+
+impl Badges {
+    fn shows(self, badge: u8) -> bool {
+        match self {
+            Badges::None => false,
+            Badges::Only(some) => some.contains(&badge),
+            Badges::All => true,
+        }
+    }
+}
+
+/// How wide the window is, for laying out the callouts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Width {
+    /// Under 550 sp: callouts below the drawing, two columns.
+    Narrow,
+    /// 550 to 720 sp, beside the sidebar: callouts below, two columns.
+    Compact,
+    /// 720 to 1000 sp: callouts below, three columns.
+    Medium,
+    /// 1000 to 1200 sp: callouts beside the drawing, two columns.
+    Wide,
+    /// 1200 sp and up: as Wide; Key Maps keeps the sidebar beside it too.
+    Full,
+}
+
+impl Width {
+    /// Wide enough for two columns, and for the drawing beside the groups.
+    pub fn is_wide(self) -> bool {
+        matches!(self, Width::Wide | Width::Full)
+    }
+}
+
+/// The button under a point in the area's own pixels, among those `badges` numbers.
+pub fn hit(x: f64, y: f64, top: &Ink, side: &Ink, badges: Badges) -> Option<&'static Hotspot> {
+    HOTSPOTS.iter().filter(|spot| badges.shows(spot.badge)).find(|spot| {
         let (ox, oy, s) = placement(spot.view, top, side);
         let (rx, ry, rw, rh) = spot.rect;
         let (px, py) = ((x - ox) / s, (y - oy) / s);
@@ -105,8 +152,8 @@ struct State {
     /// This frame's colour, and its LED, logo and glow level, 0 to 1.
     colour: Option<Rgb>,
     level: f64,
-    /// Draw the numbered badges (the mouse's buttons are known).
-    badges: bool,
+    /// The numbered badges, once the mouse's buttons are known.
+    badges: Badges,
     /// The button the pointer or a callout points at.
     target: Option<u8>,
     /// The button drawn highlighted (it stays while its fill fades), its
@@ -155,11 +202,18 @@ fn animation(
 }
 
 pub struct MouseArt {
-    /// The card: the drawing and its hint, with the callouts beside or below.
+    /// The card: the drawing, with the callouts beside or below it on the
+    /// Buttons page, or a caption under it.
     pub widget: gtk::Box,
     area: ArtArea,
-    hint: gtk::Label,
+    /// The drawing and its caption.
+    drawing: gtk::Box,
+    /// The callouts' column: the profile, the callouts and the hint.
+    side: gtk::Box,
+    profile: gtk::Label,
+    caption: gtk::Label,
     callouts: Rc<Callouts>,
+    badges: Badges,
     state: Rc<RefCell<State>>,
     inks: Rc<(Ink, Ink)>,
     on_button: Rc<Handler<usize>>,
@@ -170,35 +224,48 @@ pub struct MouseArt {
 }
 
 impl MouseArt {
-    pub fn new() -> Rc<Self> {
+    /// A drawing numbering `badges`; with `Badges::All` it carries the callouts.
+    pub fn new(badges: Badges) -> Rc<Self> {
         let inks = Rc::new((
             mouse_ink::parse(mouse_ink::TOP_SVG).expect("the top-view SVG parses (tested)"),
             mouse_ink::parse(mouse_ink::SIDE_SVG).expect("the side-view SVG parses (tested)"),
         ));
         // No ring or pulse until something starts one.
-        let state = Rc::new(RefCell::new(State { ring: 1.0, confirm_t: CONFIRM_S, ..State::default() }));
+        let state =
+            Rc::new(RefCell::new(State { ring: 1.0, confirm_t: CONFIRM_S, ..State::default() }));
         let (s, i) = (state.clone(), inks.clone());
-        let area =
-            ArtArea::new(AREA_W / AREA_H, AREA_W as i32, Box::new(move |cr, w, h| draw(cr, w, h, &s.borrow(), &i)));
+        // The tall drawing may shrink to half its height before the page scrolls.
+        let area = ArtArea::filling(
+            AREA_W / AREA_H,
+            470,
+            0.5,
+            Box::new(move |cr, w, h| draw(cr, w, h, &s.borrow(), &i)),
+        );
         area.set_hexpand(true);
-        // The hint sits in the room under the side view, as on the board; the
-        // narrow board has none.
+        let callouts = Callouts::new();
+        let profile = gtk::Label::builder().xalign(0.0).css_classes(["dim-label", "heading"]).build();
         let hint = gtk::Label::builder()
-            .label("Click a button or its chip to change what it does. Left click stays fixed.")
+            .label("Click a button on the drawing or its label to change what it does. Left click stays fixed.")
             .wrap(true)
             .xalign(0.0)
-            .max_width_chars(28)
-            .halign(gtk::Align::End)
-            .valign(gtk::Align::Center)
-            .margin_top(60)
             .css_classes(["dim-label", "caption"])
             .build();
-        let drawing = gtk::Overlay::builder().child(&area).valign(gtk::Align::Start).build();
-        drawing.add_overlay(&hint);
-        let callouts = Callouts::new();
-        let widget = gtk::Box::builder().spacing(16).css_classes(["mouse-card"]).build();
+        let side = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(16)
+            .valign(gtk::Align::Center)
+            .visible(badges == Badges::All)
+            .build();
+        side.append(&profile);
+        side.append(&callouts.grid);
+        side.append(&hint);
+        let caption = gtk::Label::builder().wrap(true).visible(false).css_classes(["dim-label", "caption"]).build();
+        let drawing = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+        drawing.append(&area);
+        drawing.append(&caption);
+        let widget = gtk::Box::builder().spacing(24).vexpand(true).css_classes(["drawing-card"]).build();
         widget.append(&drawing);
-        widget.append(&callouts.grid);
+        widget.append(&side);
         let on_button: Rc<Handler<usize>> = Rc::default();
         let f = on_button.clone();
         callouts.connect_open(move |index| {
@@ -212,16 +279,33 @@ impl MouseArt {
         fill.set_easing(adw::Easing::EaseOutCubic);
         let ring = animation(&area, &state, 1.0, RING_MS, |st, v| st.ring = v);
         let confirm = animation(&area, &state, CONFIRM_S, (CONFIRM_S * 1000.0) as u32, |st, v| st.confirm_t = v);
-        let art =
-            Rc::new(MouseArt { widget, area, hint, callouts, state, inks, on_button, ticker, fill, ring, confirm });
+        let art = Rc::new(MouseArt {
+            widget,
+            area,
+            drawing,
+            side,
+            profile,
+            caption,
+            callouts,
+            badges,
+            state,
+            inks,
+            on_button,
+            ticker,
+            fill,
+            ring,
+            confirm,
+        });
         let weak = Rc::downgrade(&art);
         art.callouts.connect_highlight(move |index| {
             if let Some(art) = weak.upgrade() {
                 art.highlight(index.map(|i| i as u8));
             }
         });
-        art.connect_pointer();
-        art.set_compact(true);
+        if badges == Badges::All {
+            art.connect_pointer();
+        }
+        art.arrange(Width::Medium);
         art
     }
 
@@ -231,25 +315,64 @@ impl MouseArt {
         *self.on_button.borrow_mut() = Some(Box::new(f));
     }
 
-    /// Callouts beside the drawing (`compact`), or below it in a narrow window.
-    pub fn set_compact(&self, compact: bool) {
-        let orientation = if compact { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
+    /// Lay the card out for the window's width: the callouts beside the
+    /// drawing when wide, below it otherwise.
+    pub fn arrange(&self, width: Width) {
+        let beside = width.is_wide();
+        let orientation = if beside { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
         self.widget.set_orientation(orientation);
-        self.hint.set_visible(compact);
-        self.callouts.arrange(compact);
+        // Beside the callouts the drawing keeps its own width; they take the rest.
+        if self.badges == Badges::All {
+            self.area.set_hexpand(!beside);
+            self.side.set_hexpand(beside);
+        }
+        self.side.set_valign(if beside { gtk::Align::Center } else { gtk::Align::Start });
+        self.callouts.arrange(if width == Width::Medium { 3 } else { 2 }, beside);
+    }
+
+    /// The text under the drawing (DPI & Profiles); empty hides it.
+    pub fn set_caption(&self, text: &str) {
+        self.caption.set_label(text);
+        self.caption.set_visible(!text.is_empty());
+    }
+
+    /// How far the drawing may shrink before the page scrolls, as a fraction
+    /// of its height (the narrow sidebar list lets it shrink further, so its
+    /// rows stay in view).
+    pub fn set_min_fraction(&self, fraction: f64) {
+        self.area.set_min_fraction(fraction);
+    }
+
+    /// A short card for a narrow window: a small drawing with the caption
+    /// beside it as a legend (DPI & Profiles), or the drawing above it.
+    pub fn set_legend_beside(&self, beside: bool) {
+        self.drawing.set_orientation(if beside { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical });
+        self.drawing.set_spacing(if beside { 20 } else { 12 });
+        self.drawing.set_halign(if beside { gtk::Align::Center } else { gtk::Align::Fill });
+        self.caption.set_valign(if beside { gtk::Align::Center } else { gtk::Align::Fill });
+        self.caption.set_xalign(if beside { 0.0 } else { 0.5 });
+        // Legend lines are short; wrapping would break them mid-phrase.
+        self.caption.set_wrap(!beside);
+        self.area.set_hexpand(!beside);
+        self.area.set_natural_width(if beside { 90 } else { 470 });
     }
 
     /// Show what the mouse is showing at its effect `speed`, and the active
-    /// profile's actions (`None` while they're unknown: no badges and no
-    /// callouts).
-    pub fn show(&self, shown: &Shown, speed: u8, actions: Option<&[ButtonAction]>) {
+    /// profile's number and actions (`None` while they're unknown: no badges
+    /// and no callouts).
+    pub fn show(&self, shown: &Shown, speed: u8, profile: Option<(u8, &[ButtonAction])>) {
+        let actions = profile.map(|(_, actions)| actions);
         self.callouts.show(actions);
+        if let Some((number, _)) = profile {
+            self.profile.set_label(&format!("Profile {number} · stored on the mouse"));
+        }
+        self.side.set_visible(self.badges == Badges::All && profile.is_some());
         let effect = art::shown_loop(shown).map(|l| (l, speed));
         {
             let mut st = self.state.borrow_mut();
             st.base = art::main_colour(shown, 0.0);
             st.effect = effect;
-            st.badges = actions.is_some();
+            st.badges = if profile.is_some() { self.badges } else { Badges::None };
             st.frame(None);
         }
         self.ticker.set_wanted(effect.is_some());
@@ -311,7 +434,8 @@ impl MouseArt {
         motion.connect_motion(move |_, x, y| {
             let Some(art) = weak.upgrade() else { return };
             let (ax, ay) = art.to_area(x, y);
-            let over = hit(ax, ay, &art.inks.0, &art.inks.1).map(|s| s.button).filter(|&b| b != 0);
+            let badges = art.state.borrow().badges;
+            let over = hit(ax, ay, &art.inks.0, &art.inks.1, badges).map(|s| s.button).filter(|&b| b != 0);
             art.area.set_cursor_from_name(over.map(|_| "pointer"));
             art.highlight(over);
         });
@@ -326,11 +450,12 @@ impl MouseArt {
         let weak = Rc::downgrade(self);
         click.connect_released(move |_, _, x, y| {
             let Some(art) = weak.upgrade() else { return };
-            if !art.state.borrow().badges {
+            let badges = art.state.borrow().badges;
+            if badges != Badges::All {
                 return;
             }
             let (ax, ay) = art.to_area(x, y);
-            if let Some(spot) = hit(ax, ay, &art.inks.0, &art.inks.1).filter(|s| s.button != 0)
+            if let Some(spot) = hit(ax, ay, &art.inks.0, &art.inks.1, badges).filter(|s| s.button != 0)
                 && let Some(f) = art.on_button.borrow().as_ref()
             {
                 f(usize::from(spot.button));
@@ -338,25 +463,6 @@ impl MouseArt {
         });
         self.area.add_controller(click);
     }
-}
-
-/// The G cut into the top-view logo disc, in the SVG's units.
-fn trace_g_top(cr: &gtk::cairo::Context) {
-    cr.new_sub_path();
-    cr.arc_negative(161.6, 518.2, 15.0, -std::f64::consts::FRAC_PI_4, -2.0 * std::f64::consts::PI);
-    cr.line_to(163.2, 518.2);
-}
-
-/// The same G, flattened and tilted onto the side view's logo.
-fn trace_g_side(cr: &gtk::cairo::Context) {
-    let m = cr.matrix();
-    cr.translate(546.0, 24.0);
-    cr.rotate(14f64.to_radians());
-    cr.scale(1.2, 0.5);
-    cr.new_sub_path();
-    cr.arc_negative(0.0, 0.0, 15.0, -std::f64::consts::FRAC_PI_4, -2.0 * std::f64::consts::PI);
-    cr.line_to(1.6, 0.0);
-    cr.set_matrix(m);
 }
 
 /// A button's fill at `fill` (0 to 1), and a ring of (radius, opacity)
@@ -381,40 +487,29 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, st: &State, inks: &(Ink, Ink))
     let s = (w / AREA_W).min(h / AREA_H);
     cr.translate((w - AREA_W * s) / 2.0, (h - AREA_H * s) / 2.0);
     cr.scale(s, s);
-    let line = st.colour.map(|c| art::drawing_colour(c, CARD));
-    let (line_rgb, line_alpha) = line.map_or(((255, 255, 255), 0.35), |c| (c, 1.0));
+    // The card is the widget's background (`.drawing-card`); it follows the style.
+    let card = art::card(is_dark());
+    let dim = art::dim_ink(card);
+    let line = st.colour.map(|c| art::drawing_colour(c, card));
+    let (line_rgb, line_alpha) = line.map_or((dim, 0.35), |c| (c, 1.0));
     let (top, side) = inks;
-    for (view, ink, trace_g) in
-        [(View::Top, top, trace_g_top as fn(&gtk::cairo::Context)), (View::Side, side, trace_g_side)]
-    {
+    for (view, ink) in [(View::Top, top), (View::Side, side)] {
         let (ox, oy, k) = placement(view, top, side);
         let m = cr.matrix();
         cr.translate(ox, oy);
         cr.scale(k, k);
-        // Glow, outlines (filled shapes), then LEDs and logo.
-        if let Some(c) = line {
-            for p in &ink.glow {
-                mouse_ink::trace(cr, p);
-                set_rgb(cr, c, 0.2 * st.level);
-                let _ = cr.fill();
-            }
-        }
+        // Lit by layer: the outlines (filled shapes), then the LEDs and logo.
         for p in &ink.outline {
             mouse_ink::trace(cr, p);
         }
         set_rgb(cr, line_rgb, line_alpha);
         let _ = cr.fill();
-        let lit = line.map_or(((255, 255, 255), 0.2), |c| (c, st.level.max(0.15)));
+        let lit = line.map_or((dim, 0.2), |c| (c, st.level.max(0.15)));
         for p in ink.leds.iter().chain(&ink.logo) {
             mouse_ink::trace(cr, p);
         }
         set_rgb(cr, lit.0, lit.1);
         let _ = cr.fill();
-        trace_g(cr);
-        set_rgb(cr, CARD, 1.0);
-        cr.set_line_width(if view == View::Top { 6.5 } else { 7.0 });
-        cr.set_line_cap(gtk::cairo::LineCap::Round);
-        let _ = cr.stroke();
         // The highlighted button, and the confirm pulse.
         let spot_of = |button: Option<u8>| HOTSPOTS.iter().find(|s| s.view == view && Some(s.button) == button);
         if let Some(spot) = spot_of(st.hover) {
@@ -430,14 +525,14 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, st: &State, inks: &(Ink, Ink))
         }
         cr.set_matrix(m);
     }
-    if st.badges {
+    if st.badges != Badges::None {
         cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
         cr.set_font_size(9.0);
-        for spot in &HOTSPOTS {
+        for spot in HOTSPOTS.iter().filter(|spot| st.badges.shows(spot.badge)) {
             let (cx, cy) = badge_centre(spot, top, side);
             cr.new_sub_path();
             cr.arc(cx, cy, BADGE_R + 1.5, 0.0, std::f64::consts::TAU);
-            set_rgb(cr, CARD, 1.0);
+            set_rgb(cr, card, 1.0);
             let _ = cr.fill();
             cr.arc(cx, cy, BADGE_R, 0.0, std::f64::consts::TAU);
             set_rgb(cr, BADGE, 1.0);
@@ -462,9 +557,38 @@ mod tests {
         let side = mouse_ink::parse(mouse_ink::SIDE_SVG).unwrap();
         for spot in &HOTSPOTS {
             let (x, y) = badge_centre(spot, &top, &side);
-            assert_eq!(hit(x, y, &top, &side).map(|s| s.badge), Some(spot.badge), "badge {}", spot.badge);
+            assert_eq!(hit(x, y, &top, &side, Badges::All).map(|s| s.badge), Some(spot.badge), "badge {}", spot.badge);
         }
-        assert!(hit(5.0, 5.0, &top, &side).is_none(), "the card's corner is no button");
+        assert!(hit(5.0, 5.0, &top, &side, Badges::All).is_none(), "the card's corner is no button");
+    }
+
+    #[test]
+    fn a_badge_subset_hits_only_its_buttons() {
+        let top = mouse_ink::parse(mouse_ink::TOP_SVG).unwrap();
+        let side = mouse_ink::parse(mouse_ink::SIDE_SVG).unwrap();
+        let dpi = Badges::Only(&[6, 7, 8, 9]);
+        for spot in &HOTSPOTS {
+            let (x, y) = badge_centre(spot, &top, &side);
+            let found = hit(x, y, &top, &side, dpi).map(|s| s.badge);
+            if [6, 7, 8, 9].contains(&spot.badge) {
+                assert_eq!(found, Some(spot.badge), "badge {}", spot.badge);
+            } else {
+                assert!(found.is_none_or(|b| [6, 7, 8, 9].contains(&b)), "badge {} hit {found:?}", spot.badge);
+            }
+            assert!(hit(x, y, &top, &side, Badges::None).is_none());
+        }
+    }
+
+    #[test]
+    fn every_button_lies_inside_the_area() {
+        let top = mouse_ink::parse(mouse_ink::TOP_SVG).unwrap();
+        let side = mouse_ink::parse(mouse_ink::SIDE_SVG).unwrap();
+        for spot in &HOTSPOTS {
+            let (ox, oy, s) = placement(spot.view, &top, &side);
+            let (x, y, w, h) = spot.rect;
+            let (x0, y0, x1, y1) = (ox + x * s, oy + y * s, ox + (x + w) * s, oy + (y + h) * s);
+            assert!(x0 >= 0.0 && y0 >= 0.0 && x1 <= AREA_W && y1 <= AREA_H, "badge {}: {x0} {y0} {x1} {y1}", spot.badge);
+        }
     }
 
     #[test]

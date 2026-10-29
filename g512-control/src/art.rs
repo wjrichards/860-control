@@ -10,8 +10,22 @@ use crate::{
 
 pub type Rgb = (u8, u8, u8);
 
-/// The illustration card's background (#1D1D20).
+/// The illustration card's background in the dark style (#1D1D20,
+/// `color.bg.illustration`).
 pub const CARD: Rgb = (0x1d, 0x1d, 0x20);
+/// The card in the light style (#F6F6F7), like GNOME Settings' illustrations.
+pub const CARD_LIGHT: Rgb = (0xf6, 0xf6, 0xf7);
+
+/// The card for the system's style.
+pub fn card(dark: bool) -> Rgb {
+    if dark { CARD } else { CARD_LIGHT }
+}
+
+/// Dim lines for an unlit drawing on `card`: white on the dark card, near-black
+/// on the light one.
+pub fn dim_ink(card: Rgb) -> Rgb {
+    if luminance(card) > 0.5 { (0, 0, 6) } else { (255, 255, 255) }
+}
 /// Least contrast between a drawing colour and the card (non-text, WCAG).
 const MIN_CONTRAST: f64 = 3.0;
 
@@ -157,14 +171,17 @@ pub fn contrast(a: Rgb, b: Rgb) -> f64 {
 }
 
 /// The colour a drawing uses for `led`: unchanged when it reaches 3:1 on
-/// the card, otherwise mixed toward white, keeping its hue, until it does.
+/// the card, otherwise mixed away from the card (toward white on the dark
+/// card, toward black on the light one), keeping its hue, until it does.
 /// Only the drawing changes; the device keeps the real colour.
 pub fn drawing_colour(led: Rgb, card: Rgb) -> Rgb {
+    let toward = if luminance(card) > 0.5 { 0.0 } else { 255.0 };
     let mix = |t: f64| {
-        let ch = |v: u8| (f64::from(v) + (255.0 - f64::from(v)) * t).round() as u8;
+        let ch = |v: u8| (f64::from(v) + (toward - f64::from(v)) * t).round() as u8;
         (ch(led.0), ch(led.1), ch(led.2))
     };
-    (0..=100).map(|step| mix(f64::from(step) / 100.0)).find(|&c| contrast(c, card) >= MIN_CONTRAST).unwrap_or((255, 255, 255))
+    let end = mix(1.0);
+    (0..=100).map(|step| mix(f64::from(step) / 100.0)).find(|&c| contrast(c, card) >= MIN_CONTRAST).unwrap_or(end)
 }
 
 #[cfg(test)]
@@ -263,6 +280,26 @@ mod tests {
         assert!(lifted.0 == lifted.1 && lifted.1 == lifted.2, "a grey stays grey");
         let navy = drawing_colour((0, 0, 0x50), CARD);
         assert!(contrast(navy, CARD) >= 3.0 && navy.2 > navy.0, "navy stays blue: {navy:?}");
+    }
+
+    #[test]
+    fn drawing_colour_darkens_on_the_light_card() {
+        for led in [(255, 255, 255), (0xf6, 0xd3, 0x2d), (0x26, 0xa2, 0x69), (0x99, 0xc1, 0xf1)] {
+            let c = drawing_colour(led, CARD_LIGHT);
+            assert!(contrast(c, CARD_LIGHT) >= 3.0, "{led:?} -> {c:?}");
+            assert!(c.0 <= led.0 && c.1 <= led.1 && c.2 <= led.2, "darkened, not lightened: {led:?} -> {c:?}");
+        }
+        assert_eq!(drawing_colour((0x1c, 0x71, 0xd8), CARD_LIGHT), (0x1c, 0x71, 0xd8), "deep blue is already fine");
+        let white = drawing_colour((255, 255, 255), CARD_LIGHT);
+        assert!(white.0 == white.1 && white.1 == white.2, "white becomes a grey: {white:?}");
+    }
+
+    #[test]
+    fn card_follows_the_style() {
+        assert_eq!(card(true), CARD);
+        assert_eq!(card(false), CARD_LIGHT);
+        assert_eq!(dim_ink(CARD), (255, 255, 255));
+        assert_eq!(dim_ink(CARD_LIGHT), (0, 0, 6));
     }
 
     #[test]

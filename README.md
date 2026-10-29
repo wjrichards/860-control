@@ -1,11 +1,13 @@
-# g512-control
+# 860 Control
 
-Lighting control for the Logitech G512 RGB keyboard (USB `046d:c33c`) and G502 HERO mouse (`046d:c08b`) on a GNOME desktop.
+A gaming peripheral center for GNOME desktops. Its mission is to bridge the gap between what the system supports and what the hardware can do.
+
+Today it covers the Logitech G512 RGB keyboard (USB `046d:c33c`) and G502 HERO mouse (`046d:c08b`). The code, packages, app id and D-Bus names keep the project's original name, `g512-control`.
 
 It has four parts:
 
 - **`g512d`**: a user service that owns the keyboard and the mouse. It applies lighting over HID++ 2.0, saves the last setting, and re-applies it when a device is plugged back in or the computer wakes from suspend. It offers a session D-Bus interface, `io.github.g512control.Lighting1`.
-- **G512 Control** (`io.github.g512control.Control`): a GTK4/libadwaita app, packaged as a Flatpak. It talks to `g512d` over D-Bus and has no access to the devices itself.
+- **860 Control** (`io.github.g512control.Control`): a GTK4/libadwaita app, packaged as a Flatpak. It talks to `g512d` over D-Bus and has no access to the devices itself.
 - **Quick Settings tile** (`gnome-extension/`): an optional GNOME Shell 50 extension with the everyday controls. It also only talks to `g512d`.
 - **`g512-hidpp`**: the protocol library the service is built on.
 
@@ -47,7 +49,7 @@ flatpak run org.flatpak.Builder --user --install --force-clean \
     --state-dir=.flatpak-builder build-dir packaging/flatpak/io.github.g512control.Control.json
 ```
 
-Open **G512 Control** from the app grid.
+Open **860 Control** from the app grid.
 
 ### 4. Quick Settings tile (optional)
 
@@ -75,13 +77,21 @@ The tile hides itself while `g512d` isn't running, and never starts it. After a 
 
 ## The app
 
-The app has two views, **Keyboard** and **Mouse**, switched at the top of the window, or at the bottom when the window is narrow. The Mouse view appears when the service supports a G502 HERO. Each view shows its own device's state: if the keyboard is unplugged, the Keyboard view says so and the Mouse view keeps working, and the other way round.
+The app has a sidebar like GNOME Settings, with a section for each device it finds:
+- **Keyboard:** Lighting, Key Maps and Games.
+- **Mouse:** Lighting, DPI & Profiles and Buttons. It appears when the service supports a G502 HERO.
 
-Each view opens with a drawing of its device in its current lighting:
-- **The keyboard** shows lit keys as tiles in their colour and unlit keys as outlines: the effect's colour, or the key map being shown. Click it, or press Enter on it, to open **Key Maps**; **Edit Key Maps…** below does the same.
-- **The mouse** is drawn from above and from the side, in its lighting colour, with the G logo and DPI LEDs lit. A number marks each programmable button, and the list beside the drawing (below it in a narrow window) shows what each one does in the active profile. Click a button on the drawing, or its entry in the list, to change it. Left click is shown as fixed.
+A device's section is there only while the device is plugged in. Unplug the mouse while one of its pages is open and the app moves to the keyboard's Lighting page and says "Mouse disconnected"; with neither device plugged in, the window says **No Devices Connected**. A device that is plugged in but can't be used (no access, or unsupported) keeps its section, and its pages explain why.
 
-Colours too dark to see against the drawing's background are lightened, keeping their hue. With the lights off, the drawings are dim outlines.
+In a narrow window the sidebar becomes its own page, with a drawing of each device under its name; choosing a page opens it with a Back button. In a wide window the settings sit in two columns. The window opens at 860 × 780.
+
+On **Key Maps**, until the window is wide enough for the keyboard beside the sidebar (about 1200 px), the sidebar folds away; the button at the top left slides it back in over the page.
+
+Pages show a drawing of their device in its current lighting, on a card that takes the room the settings leave:
+- **The keyboard** shows lit keys as tiles in their colour and unlit keys as outlines: the effect's colour, or the key map being shown. Click it, or press Enter on it, to open **Key Maps**.
+- **The mouse** is drawn from above, with the side view below, in its lighting colour, with the logo and DPI LEDs lit. On **Buttons**, a number marks each programmable button, and the list beside the drawing (below it in a narrower window) shows what each one does in the active profile. Click a button on the drawing, or its entry in the list, to change it. Left click is shown as fixed.
+
+Colours too hard to see against the card are lightened on the dark card and darkened on the light one, keeping their hue. The card follows the system's light or dark style. With the lights off, the drawings are dim outlines.
 
 While GNOME's animations are on, the drawings play the current effect: Ripple's ring, Wave's band, Breathe's fade and Cycle's colour, at the effect's speed. Pointing at a mouse button fills it and sends a ring out, and applying a change pulses it once. With **Reduce Animation** on (Settings → Accessibility), the drawings stay still and nothing pulses.
 
@@ -97,7 +107,7 @@ The mouse drawings are the project's own ink drawings of the G502 HERO, in `g512
 
 ## Mouse
 
-The app's **Mouse** view appears when the service supports a G502 HERO. With **Match Keyboard** on, which is the default, the logo and DPI strip follow the keyboard's lighting and brightness. The mouse has only Off, Static, Breathe and Cycle, so it shows the nearest one:
+The app's **Mouse** section appears when the service supports a G502 HERO. On its **Lighting** page, with **Match Keyboard** on, which is the default, the logo and DPI strip follow the keyboard's lighting and brightness. The mouse has only Off, Static, Breathe and Cycle, so it shows the nearest one:
 - **Wave** becomes Cycle at the same speed.
 - **Ripple** becomes Static in Ripple's colour.
 - **The Custom map, or the Gaming map during a game,** becomes Static in the colour that map gives W, or Off if W is off.
@@ -108,10 +118,10 @@ The mouse stays in its own onboard-profile mode, so its DPI buttons keep working
 
 ### DPI, report rate and profiles
 
-The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The Mouse view's **Profile** group shows the active profile:
+The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The **DPI & Profiles** page shows the active profile, with the buttons that change DPI and profile numbered on the drawing:
 - **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away. G9, the button behind the wheel, also switches profiles on the mouse; the app follows within about 2 seconds.
 - **Report Rate:** 125, 250, 500 or 1000 Hz.
-- **DPI steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
+- **DPI Steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
 
 Changes are **written to the mouse** about 2 seconds after you stop editing, as one write. Because they live on the mouse, they also work on other computers.
 
@@ -125,7 +135,7 @@ Only the report rate, DPI steps and default step are changed here. Button assign
 
 ### Buttons
 
-The **Buttons** group lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. The same list sits beside the mouse drawing, numbered to match it. **Change**, a button in that list, or the button itself on the drawing opens a dialog with:
+The **Buttons** page lists what each button does in the active profile, numbered to match the drawing: Left Click, Right Click, Wheel Click, Wheel Tilt Left and Right, G9, DPI Up, DPI Down, Sniper, and Back and Forward (the thumb buttons). A button in that list, or the button itself on the drawing, opens a dialog with:
 - **Mouse Button:** left, right or middle click, back or forward;
 - **Keyboard Shortcut:** choose **Set Shortcut**, then press the keys, for example Ctrl+C. Esc cancels. Letters, digits, F1 to F12, Enter, Tab, Space, Backspace, punctuation, the arrows and Insert, Delete, Home, End, Page Up and Page Down work; the dialog says when a key can't be used;
 - **Media Key:** play/pause, next and previous track, volume up and down, mute;
@@ -138,9 +148,9 @@ If G9 no longer switches profiles, the app's **Profile** row still does.
 
 ## Key maps
 
-Clicking the keyboard drawing, or **Edit Key Maps…**, opens **Key Maps**, a drawing of the keyboard to edit. Choose **Custom** or **Gaming** at the top to pick which map you are editing.
+**Key Maps** in the sidebar, or clicking the keyboard drawing, opens a drawing of the keyboard to edit. Choose **Custom** or **Gaming** at the top to pick which map you are editing; **Edit the Gaming Map** on the **Games** page opens it on Gaming. The keys shrink to fit the window, down to about 60% of their size; in a narrow window they keep their size and the keyboard scrolls sideways.
 
-- Click keys to select them, or drag across them. The buttons above the keyboard select groups: WASD, the arrows, the F-keys, the number row, the numpad or the modifiers.
+- Click keys to select them, or drag across them; the line under the keyboard counts them. A selected key gets a white outline. The buttons under the keyboard select groups: WASD, the arrows, the F-keys, the number row, the numpad or the modifiers.
 - Pick a colour, then **Paint Selected**. **Turn Off** leaves the selected keys dark.
 - Without a pointer: Tab moves to the drawn keyboard, the arrow keys move between keys, and Space selects one.
 
@@ -150,7 +160,7 @@ The Gaming map starts with W, A, S, D, Space, Left Shift, Left Ctrl, 1 to 5 and 
 
 ### Gaming layout while a game runs
 
-Turn on **Switch to Gaming Layout While a Game Runs** in the app. While a game is registered with [GameMode](https://github.com/FeralInteractive/gamemode), the keyboard shows the Gaming map. When the last game closes, it goes back to your normal lighting. If you change the lighting during a game, your change stays until the next game starts.
+Turn on **Switch to Gaming Layout While a Game Runs** on the app's **Games** page. The page shows the Gaming map, and its **Now** row says whether a game is running. While a game is registered with [GameMode](https://github.com/FeralInteractive/gamemode), the keyboard shows the Gaming map. When the last game closes, it goes back to your normal lighting. If you change the lighting during a game, your change stays until the next game starts.
 
 A game is only registered if it uses GameMode. For Steam games, add this to the game's **Launch Options**:
 

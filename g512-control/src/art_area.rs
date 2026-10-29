@@ -1,6 +1,8 @@
 //! A drawing area that keeps its aspect ratio: height follows width, so an
-//! illustration fits a wide window and a phone-width column alike. Plus the
-//! ticker that runs an illustration's effect loop on the frame clock.
+//! illustration fits a wide window and a phone-width column alike. A filling
+//! area also takes the height its page leaves free, and its drawing scales to
+//! fit both ways. Plus the ticker that runs an illustration's effect loop on
+//! the frame clock.
 
 use std::{
     cell::{Cell, RefCell},
@@ -20,6 +22,8 @@ mod imp {
     pub struct ArtArea {
         pub aspect: Cell<f64>,
         pub natural_width: Cell<i32>,
+        /// The least height, as a fraction of the aspect-correct one.
+        pub min_fraction: Cell<f64>,
         pub draw: RefCell<Option<DrawFn>>,
     }
 
@@ -47,8 +51,8 @@ mod imp {
                 gtk::Orientation::Horizontal => (natural.min(200), natural, -1, -1),
                 _ => {
                     let width = if for_size < 0 { natural } else { for_size };
-                    let height = (f64::from(width) / self.aspect.get().max(0.1)).round() as i32;
-                    (height, height, -1, -1)
+                    let (min, height) = heights(width, self.aspect.get(), self.min_fraction.get());
+                    (min, height, -1, -1)
                 }
             }
         }
@@ -81,9 +85,48 @@ impl ArtArea {
         let imp = area.imp();
         imp.aspect.set(aspect);
         imp.natural_width.set(natural_width);
+        imp.min_fraction.set(1.0);
         *imp.draw.borrow_mut() = Some(draw);
+        // The card's colour, and the drawing's with it, follow the style.
+        let weak = area.downgrade();
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(area) = weak.upgrade() {
+                area.queue_draw();
+            }
+        });
         area
     }
+
+    /// An area that takes the height its page leaves free (`vexpand`), and
+    /// shrinks to `min_fraction` of its aspect-correct height before the page
+    /// scrolls. The draw function fits the drawing both ways.
+    pub fn filling(aspect: f64, natural_width: i32, min_fraction: f64, draw: DrawFn) -> Self {
+        let area = Self::new(aspect, natural_width, draw);
+        area.imp().min_fraction.set(min_fraction.clamp(0.0, 1.0));
+        area.set_vexpand(true);
+        area
+    }
+}
+
+impl ArtArea {
+    /// The least height, as a fraction of the aspect-correct one.
+    pub fn set_min_fraction(&self, fraction: f64) {
+        self.imp().min_fraction.set(fraction.clamp(0.0, 1.0));
+        self.queue_resize();
+    }
+
+    /// The width the area asks for when there's room.
+    pub fn set_natural_width(&self, width: i32) {
+        self.imp().natural_width.set(width);
+        self.queue_resize();
+    }
+}
+
+/// The (least, natural) height for `width`: natural keeps the aspect, least
+/// is `min_fraction` of that.
+pub fn heights(width: i32, aspect: f64, min_fraction: f64) -> (i32, i32) {
+    let natural = (f64::from(width) / aspect.max(0.1)).round() as i32;
+    ((f64::from(natural) * min_fraction).round() as i32, natural)
 }
 
 /// Frames drawn by effect loops, for the reduced-motion check
@@ -175,4 +218,23 @@ pub fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r:
 /// Set a Cairo source colour from an (r, g, b) triple and an alpha.
 pub fn set_rgb(cr: &gtk::cairo::Context, (r, g, b): (u8, u8, u8), alpha: f64) {
     cr.set_source_rgba(f64::from(r) / 255.0, f64::from(g) / 255.0, f64::from(b) / 255.0, alpha);
+}
+
+/// Whether the system uses the dark style (the drawings' card follows it).
+pub fn is_dark() -> bool {
+    adw::StyleManager::default().is_dark()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heights_keep_the_aspect_and_the_floor() {
+        // The keyboard card, 694 x 246, never shrinks: the page scrolls.
+        assert_eq!(heights(976, 694.0 / 246.0, 1.0), (346, 346));
+        // The stacked mouse, 290 x 420, may shrink to half before scrolling.
+        assert_eq!(heights(336, 290.0 / 420.0, 0.5), (244, 487));
+        assert_eq!(heights(0, 2.0, 1.0), (0, 0));
+    }
 }
