@@ -1,22 +1,23 @@
-//! The keyboard illustration at the top of the Keyboard view: lit keys as
-//! solid tiles in their colour, unlit keys as outlines, in a rounded case.
-//! It is a button: clicking it, or Enter while focused, opens Key Maps.
-//! Moving effects play on it while animations are on.
+//! The keyboard illustration on Keyboard › Lighting, Keyboard › Games and the
+//! narrow sidebar list: lit keys as solid tiles in their colour, unlit keys
+//! as outlines, in a rounded case, on a card that takes the page's free
+//! height. It is a button: clicking it, or Enter while focused, opens Key
+//! Maps. Moving effects play on it while animations are on.
 
 use std::{cell::RefCell, rc::Rc};
 
 use gtk::prelude::*;
 
 use crate::{
-    art::{self, CARD, Rgb, Shown},
-    art_area::{ArtArea, Ticker, rounded_rect, set_rgb},
+    art::{self, Rgb, Shown},
+    art_area::{ArtArea, Ticker, is_dark, rounded_rect, set_rgb},
     editor::color_name,
     layout::KEYS,
     motion::{self, Loop},
     service::{Keys, LightingState},
 };
 
-/// The board's proportions: a 694 x 246 card around a 658 x 210 drawing.
+/// The board's proportions: a 694 x 246 frame around a 658 x 210 drawing.
 const CARD_W: f64 = 694.0;
 const CARD_H: f64 = 246.0;
 const INSET: f64 = 18.0;
@@ -60,26 +61,39 @@ impl Scene {
 }
 
 pub struct KeyboardArt {
+    /// The card: the drawing, and the hint under it when there is one.
     pub widget: gtk::Box,
     button: gtk::Button,
+    hint: gtk::Label,
     area: ArtArea,
     scene: Rc<RefCell<Option<Scene>>>,
     ticker: Rc<Ticker>,
 }
 
 impl KeyboardArt {
-    pub fn new() -> Rc<Self> {
+    /// A card whose drawing takes the page's free height, with `hint` under
+    /// it (none when empty).
+    pub fn new(hint: &str) -> Rc<Self> {
         let drawn: Rc<RefCell<Drawn>> = Rc::default();
         let d = drawn.clone();
-        let area = ArtArea::new(CARD_W / CARD_H, CARD_W as i32, Box::new(move |cr, w, h| draw(cr, w, h, &d.borrow())));
-        let button = gtk::Button::builder().child(&area).css_classes(["flat", "device-art"]).build();
-        let caption = gtk::Label::builder()
-            .label("Click the keyboard to edit Key Maps")
+        let area =
+            ArtArea::filling(CARD_W / CARD_H, CARD_W as i32, 1.0, Box::new(move |cr, w, h| draw(cr, w, h, &d.borrow())));
+        let button =
+            gtk::Button::builder().child(&area).vexpand(true).css_classes(["flat", "device-art"]).build();
+        let widget = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .vexpand(true)
+            .css_classes(["drawing-card"])
+            .build();
+        widget.append(&button);
+        let hint = gtk::Label::builder()
+            .label(hint)
+            .wrap(true)
+            .visible(!hint.is_empty())
             .css_classes(["dim-label", "caption"])
             .build();
-        let widget = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        widget.append(&button);
-        widget.append(&caption);
+        widget.append(&hint);
         let scene: Rc<RefCell<Option<Scene>>> = Rc::default();
         let s = scene.clone();
         let ticker = Ticker::new(&area, move |t| {
@@ -87,7 +101,12 @@ impl KeyboardArt {
                 *drawn.borrow_mut() = scene.frame(t);
             }
         });
-        Rc::new(KeyboardArt { widget, button, area, scene, ticker })
+        Rc::new(KeyboardArt { widget, button, hint, area, scene, ticker })
+    }
+
+    /// The hint under the drawing (a shorter one fits a narrow window).
+    pub fn set_hint(&self, hint: &str) {
+        self.hint.set_label(hint);
     }
 
     /// `f` runs when the illustration is clicked or activated.
@@ -109,6 +128,12 @@ impl KeyboardArt {
         self.ticker.set_wanted(moving);
         self.area.queue_draw();
     }
+
+    /// Show the Gaming map, whatever the keyboard is showing (the Games page).
+    pub fn show_gaming(&self, gaming: &Keys) {
+        let state = LightingState { effect: "Static".into(), color: (0, 0, 0), speed: 0, brightness: 100 };
+        self.show(true, true, &state, &Keys::new(), gaming);
+    }
 }
 
 /// The spoken description, e.g. "Ripple, green" or "lights off".
@@ -127,15 +152,13 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, drawn: &Drawn) {
     let (ox, oy) = ((w - CARD_W * s) / 2.0, (h - CARD_H * s) / 2.0);
     cr.translate(ox, oy);
     cr.scale(s, s);
-    // The card.
-    rounded_rect(cr, 0.0, 0.0, CARD_W, CARD_H, 12.0);
-    set_rgb(cr, CARD, 1.0);
-    let _ = cr.fill();
+    // The card is the widget's background (`.drawing-card`); it follows the style.
+    let card = art::card(is_dark());
     cr.translate(INSET, INSET);
-    let line = drawn.main.map(|c| art::drawing_colour(c, CARD));
+    let line = drawn.main.map(|c| art::drawing_colour(c, card));
     let (line_rgb, case_alpha, outline_alpha) = match line {
         Some(c) => (c, 1.0, 0.25),
-        None => ((255, 255, 255), 0.3, 0.21),
+        None => (art::dim_ink(card), 0.3, 0.21),
     };
     // The case.
     let (dw, dh) = (90.0 * UNIT + 2.0 * PAD, 26.0 * UNIT + 2.0 * PAD);
@@ -152,7 +175,7 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, drawn: &Drawn) {
         match fill {
             Some((colour, level)) => {
                 rounded_rect(cr, x, y, kw, kh, 3.5);
-                set_rgb(cr, art::drawing_colour(*colour, CARD), *level);
+                set_rgb(cr, art::drawing_colour(*colour, card), *level);
                 let _ = cr.fill();
             }
             None => {

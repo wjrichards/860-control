@@ -1,5 +1,9 @@
-//! The main window: status pages for problems, otherwise the lighting
-//! controls, with the key-map editor as a second page.
+//! The main window: a sidebar in the style of GNOME Settings with one
+//! section per detected device (Keyboard: Lighting, Key Maps, Games; Mouse:
+//! Lighting, DPI & Profiles, Buttons), and the chosen page beside it. In a
+//! narrow window the sidebar becomes its own page and pages open with Back.
+//! Status pages cover the window when the service can't be reached or no
+//! device is connected.
 
 use std::{
     cell::{Cell, RefCell},
@@ -14,62 +18,198 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
     art,
+    button_actions::describe,
     button_section::ButtonSection,
     editor::{Editor, MapName},
     keyboard_art::KeyboardArt,
-    mouse_art::MouseArt,
+    mouse_art::{Badges, HOTSPOTS, MouseArt, Width},
     mouse_section::MouseSection,
     profile_section::ProfileSection,
-    service::{self, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, OBJECT_PATH, PerKey, Snapshot},
+    service::{
+        self, ButtonAction, CUSTOM, DeviceState, EffectInfo, Keys, LightingProxy, LightingState, Mouse, OBJECT_PATH,
+        PerKey, Snapshot,
+    },
     throttle::Throttle,
     udev,
 };
 
 pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 
-/// The illustrations sit in flat buttons; focus and hover get the accent ring.
+/// The drawings sit on cards that follow the style; the keyboard drawing is
+/// a flat button, and focus and hover give it the accent ring.
 const APP_CSS: &str = "
+.drawing-card { background: #1d1d20; border-radius: 12px; padding: 16px; }
 .device-art { padding: 0; border-radius: 12px; }
 .device-art:hover, .device-art:focus-visible { outline: 3px solid alpha(@accent_bg_color, 0.8); outline-offset: 2px; }
-.mouse-card { background: #1d1d20; border-radius: 12px; padding: 16px; }
 .callout { min-height: 44px; padding: 4px 10px; }
-.callout-fixed { border: 1px dashed alpha(white, 0.35); }
+.callout-fixed { border: 1px dashed alpha(currentColor, 0.35); }
+.sidebar-section { margin: 12px 12px 4px 12px; }
+.navigation-sidebar > row.current { background-color: alpha(currentColor, 0.1); }
 ";
+/// The light style's card: `color.bg.illustration` and `color.border.illustration`.
+const LIGHT_CSS: &str = ".drawing-card { background: #f6f6f7; box-shadow: inset 0 0 0 1px rgb(0 0 6 / 7%); }";
 
-/// The views' widths, as on the boards: the keyboard card is 694 px wide,
-/// and the mouse card 760 px so the callouts fit beside the drawing.
-const KEYBOARD_WIDTH: i32 = 694;
-const MOUSE_WIDTH: i32 = 760;
+/// The Games page's hint under the Gaming map, and its narrow-window form.
+const GAMES_HINT: &str = "Gaming map · click the keyboard to edit it in Key Maps";
+const GAMES_HINT_NARROW: &str = "Gaming map · click it to edit in Key Maps";
+/// The least scale of the Key Maps keys beside the sidebar or with it folded;
+/// a narrow window keeps them full size and scrolls.
+const KEY_FLOOR: f64 = 0.6;
 
-/// A view's scrolling column of groups: `AdwPreferencesPage`'s layout, with
-/// the view's own width in place of its fixed clamp.
-struct Page {
-    widget: gtk::ScrolledWindow,
+/// Badges 6 to 9 (next profile, DPI up, DPI down, DPI shift) on DPI & Profiles.
+const DPI_BADGES: &[u8] = &[6, 7, 8, 9];
+
+/// The pages, in sidebar order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PageId {
+    KbLighting,
+    KbKeyMaps,
+    KbGames,
+    MsLighting,
+    MsDpi,
+    MsButtons,
+}
+
+impl PageId {
+    const ALL: [PageId; 6] =
+        [PageId::KbLighting, PageId::KbKeyMaps, PageId::KbGames, PageId::MsLighting, PageId::MsDpi, PageId::MsButtons];
+
+    fn device(self) -> Device {
+        match self {
+            PageId::KbLighting | PageId::KbKeyMaps | PageId::KbGames => Device::Keyboard,
+            _ => Device::Mouse,
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            PageId::KbLighting => "keyboard-lighting",
+            PageId::KbKeyMaps => "keymaps",
+            PageId::KbGames => "games",
+            PageId::MsLighting => "mouse-lighting",
+            PageId::MsDpi => "dpi",
+            PageId::MsButtons => "buttons",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            PageId::KbLighting | PageId::MsLighting => "Lighting",
+            PageId::KbKeyMaps => "Key Maps",
+            PageId::KbGames => "Games",
+            PageId::MsDpi => "DPI & Profiles",
+            PageId::MsButtons => "Buttons",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            PageId::KbLighting | PageId::MsLighting => "display-brightness-symbolic",
+            PageId::KbKeyMaps => "view-grid-symbolic",
+            PageId::KbGames => "input-gaming-symbolic",
+            PageId::MsDpi => "find-location-symbolic",
+            PageId::MsButtons => "input-mouse-symbolic",
+        }
+    }
+
+    fn index(self) -> usize {
+        PageId::ALL.iter().position(|&p| p == self).unwrap_or(0)
+    }
+}
+
+/// A page beside the sidebar: its scrolling column, swapped for a status
+/// page while its device is present but not usable.
+struct ContentPage {
+    page: adw::NavigationPage,
+    toolbar: adw::ToolbarView,
+    header: adw::HeaderBar,
+    stack: gtk::Stack,
+    status: StatusView,
     column: gtk::Box,
 }
 
-impl Page {
-    fn new(width: i32) -> Self {
+impl ContentPage {
+    fn new(id: PageId) -> Self {
         let column = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(24)
-            .margin_top(24)
+            .margin_top(12)
             .margin_bottom(24)
-            .margin_start(12)
-            .margin_end(12)
+            .margin_start(32)
+            .margin_end(32)
+            .vexpand(true)
             .build();
-        let clamp =
-            adw::Clamp::builder().maximum_size(width).tightening_threshold(width * 3 / 4).child(&column).build();
-        let widget = gtk::ScrolledWindow::builder()
+        // The column fills the page; its drawing card takes what the groups
+        // leave free, and the page scrolls once nothing is left.
+        let scrolled = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
-            .child(&clamp)
+            .child(&column)
             .build();
-        Page { widget, column }
+        let status = StatusView::new(None);
+        let stack = gtk::Stack::new();
+        stack.add_named(&status.page, Some("status"));
+        stack.add_named(&scrolled, Some("controls"));
+        stack.set_visible_child_name("controls");
+        let toolbar = adw::ToolbarView::new();
+        let header = adw::HeaderBar::new();
+        toolbar.add_top_bar(&header);
+        toolbar.set_content(Some(&stack));
+        let page = adw::NavigationPage::builder().title(id.title()).tag(id.tag()).child(&toolbar).build();
+        ContentPage { page, toolbar, header, stack, status, column }
     }
+}
 
-    fn add(&self, group: &adw::PreferencesGroup) {
-        self.column.append(group);
+/// A row in the sidebar.
+struct SidebarRow {
+    id: PageId,
+    row: gtk::ListBoxRow,
+    /// Shown while the sidebar is its own page: rows open pages with Back.
+    chevron: gtk::Image,
+}
+
+impl SidebarRow {
+    fn new(id: PageId) -> Self {
+        let content = gtk::Box::builder().spacing(12).build();
+        content.append(&gtk::Image::from_icon_name(id.icon()));
+        content.append(&gtk::Label::builder().label(id.title()).xalign(0.0).hexpand(true).build());
+        let chevron = gtk::Image::builder().icon_name("go-next-symbolic").visible(false).build();
+        content.append(&chevron);
+        let row = gtk::ListBoxRow::builder().child(&content).build();
+        SidebarRow { id, row, chevron }
+    }
+}
+
+/// A device's sidebar section: its header, its drawing (narrow only) and its rows.
+struct Section {
+    widget: gtk::Box,
+    list: gtk::ListBox,
+    art: gtk::Widget,
+}
+
+impl Section {
+    fn new(name: &str, model: &str, art: &gtk::Widget, rows: &[&SidebarRow]) -> Self {
+        let header = gtk::Box::builder().spacing(6).css_classes(["sidebar-section"]).build();
+        header.append(&gtk::Label::builder().label(name).css_classes(["dim-label", "caption-heading"]).build());
+        header.append(&gtk::Label::builder().label(format!("· {model}")).css_classes(["dim-label", "caption"]).build());
+        header.update_property(&[gtk::accessible::Property::Label(&format!("{name}, {model}"))]);
+        // The open page's row is marked by `Ui::open`, not by the list's own
+        // selection, which focus and pointer moves would change.
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["navigation-sidebar"])
+            .build();
+        for r in rows {
+            list.append(&r.row);
+        }
+        art.set_visible(false);
+        art.set_margin_start(6);
+        art.set_margin_end(6);
+        let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+        widget.append(&header);
+        widget.append(art);
+        widget.append(&list);
+        Section { widget, list, art: art.clone() }
     }
 }
 
@@ -79,10 +219,9 @@ enum Status {
     NoSessionBus(String),
 }
 
-/// A device that isn't usable, shown on its own view's status page.
+/// A device that is present but not usable, shown on its pages' status page.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DeviceProblem {
-    Disconnected,
     PermissionDenied,
     Unsupported,
 }
@@ -128,27 +267,11 @@ impl StatusView {
 
 /// Icon, title, description and detail for a device that isn't usable.
 fn problem_text(device: Device, problem: DeviceProblem) -> (&'static str, &'static str, &'static str, String) {
-    let (icon, name) = match device {
-        Device::Keyboard => ("input-keyboard-symbolic", "keyboard"),
-        Device::Mouse => ("input-mouse-symbolic", "mouse"),
-    };
     match (device, problem) {
-        (Device::Keyboard, DeviceProblem::Disconnected) => (
-            icon,
-            "Keyboard Not Connected",
-            "Plug in the Logitech G512. Your saved lighting is applied when it connects. The Mouse view keeps working meanwhile.",
-            String::new(),
-        ),
-        (Device::Mouse, DeviceProblem::Disconnected) => (
-            icon,
-            "Mouse Not Connected",
-            "Plug in the G502 HERO. Its lighting is applied when it connects, and its profiles and buttons are read from the mouse. The Keyboard view keeps working meanwhile.",
-            String::new(),
-        ),
         (_, DeviceProblem::PermissionDenied) => (
             "dialog-password-symbolic",
             if device == Device::Keyboard { "No Access to the Keyboard" } else { "No Access to the Mouse" },
-            if name == "keyboard" {
+            if device == Device::Keyboard {
                 "Install the udev rule once. It covers the keyboard and the mouse. Then unplug and replug the keyboard."
             } else {
                 "Install the udev rule once. It covers the keyboard and the mouse. Then unplug and replug the mouse."
@@ -170,6 +293,35 @@ fn problem_text(device: Device, problem: DeviceProblem) -> (&'static str, &'stat
     }
 }
 
+/// The DPI & Profiles caption: badges 6 to 9 with each one's current action,
+/// one line each beside a narrow drawing, or in a row under a wide one.
+fn dpi_caption(actions: &[ButtonAction], legend: bool) -> String {
+    let parts: Vec<String> = DPI_BADGES
+        .iter()
+        .filter_map(|&badge| {
+            let spot = HOTSPOTS.iter().find(|s| s.badge == badge)?;
+            let action = actions.get(usize::from(spot.button))?;
+            let what = describe(action);
+            // "6 next profile" in the row; "6  Next profile" as a legend line.
+            Some(if legend { format!("{badge}  {what}") } else { format!("{badge} {}", lower_first(&what)) })
+        })
+        .collect();
+    parts.join(if legend { "\n" } else { " · " })
+}
+
+/// "Next profile" → "next profile"; "DPI up" and "Ctrl+C" keep their capitals.
+/// Only a plain capitalised word (a letter, then lower-case letters) is lowered.
+fn lower_first(text: &str) -> String {
+    let word = text.split(' ').next().unwrap_or("");
+    let mut chars = word.chars();
+    let plain = chars.next().is_some_and(char::is_uppercase) && chars.all(char::is_lowercase);
+    if !plain {
+        return text.to_string();
+    }
+    let mut chars = text.chars();
+    chars.next().map(|first| first.to_lowercase().chain(chars).collect()).unwrap_or_default()
+}
+
 struct Bus {
     lighting: LightingProxy<'static>,
     props: PropertiesProxy<'static>,
@@ -178,24 +330,36 @@ struct Bus {
 pub struct Ui {
     window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
-    /// The whole window: "status" (service unreachable) or "main".
+    /// The whole window: "status" (service unreachable), "none" (no device)
+    /// or "main".
     stack: gtk::Stack,
     status: StatusView,
     retry: gtk::Button,
-    view_stack: adw::ViewStack,
-    mouse_view: adw::ViewStackPage,
-    view_switcher: adw::ViewSwitcher,
-    switcher_bar: adw::ViewSwitcherBar,
-    window_title: adw::WindowTitle,
-    /// Each view: "status" (its device isn't usable) or "controls".
-    keyboard_stack: gtk::Stack,
-    keyboard_status: StatusView,
-    mouse_stack: gtk::Stack,
-    mouse_status: StatusView,
-    /// Set while the narrow-window breakpoint applies.
-    narrow: Cell<bool>,
-    /// The service reports a mouse (it supports one).
-    has_mouse: Cell<bool>,
+    split: adw::NavigationSplitView,
+    /// The sidebar page and its content. On Key Maps, between 550 and
+    /// 1200 sp, the content moves into `fold` and slides in over the page.
+    sidebar_page: adw::NavigationPage,
+    sidebar_toolbar: adw::ToolbarView,
+    fold: adw::OverlaySplitView,
+    /// On the Key Maps header while the sidebar is folded away.
+    sidebar_button: gtk::ToggleButton,
+    pages: Vec<ContentPage>,
+    rows: Vec<SidebarRow>,
+    keyboard_section: Section,
+    mouse_section_side: Section,
+    separator: gtk::Separator,
+    /// The page shown beside the sidebar.
+    current: Cell<Option<PageId>>,
+    /// Whether each device's section was shown after the last refresh (`None`
+    /// before the first), so a device leaving is announced once.
+    keyboard_present: Cell<Option<bool>>,
+    mouse_present: Cell<Option<bool>>,
+    width: Cell<Width>,
+    keyboard_columns: gtk::Box,
+    games_columns: gtk::Box,
+    mouse_lighting_row: gtk::Box,
+    mouse_dpi_row: gtk::Box,
+    css_light: gtk::CssProvider,
     device_row: adw::ActionRow,
     lights_row: adw::SwitchRow,
     effect_row: adw::ComboRow,
@@ -205,19 +369,24 @@ pub struct Ui {
     speed_row: adw::ActionRow,
     speed: gtk::Scale,
     brightness: gtk::Scale,
-    nav: adw::NavigationView,
     editor: Rc<Editor>,
     mouse_section: Rc<MouseSection>,
     profile_section: Rc<ProfileSection>,
     button_section: Rc<ButtonSection>,
-    keymaps_row: adw::ActionRow,
-    keymaps_button: gtk::Button,
     keyboard_art: Rc<KeyboardArt>,
-    mouse_art: Rc<MouseArt>,
+    games_art: Rc<KeyboardArt>,
+    list_keyboard_art: Rc<KeyboardArt>,
+    mouse_lighting_art: Rc<MouseArt>,
+    mouse_dpi_art: Rc<MouseArt>,
+    mouse_buttons_art: Rc<MouseArt>,
+    list_mouse_art: Rc<MouseArt>,
+    /// The active profile's actions, for the DPI & Profiles caption.
+    dpi_actions: RefCell<Vec<ButtonAction>>,
     /// The Gaming map is on the keyboard because a game is running.
     gaming_shown: Cell<bool>,
-    games_group: adw::PreferencesGroup,
     game_row: adw::SwitchRow,
+    now_row: adw::ActionRow,
+    edit_gaming_row: adw::ActionRow,
     banner: adw::Banner,
     effects: RefCell<Vec<EffectInfo>>,
     /// Set while the controls are updated from the service, so their change
@@ -228,7 +397,7 @@ pub struct Ui {
     keys_throttle: RefCell<Throttle<(MapName, Keys)>>,
     keys_flush_scheduled: Cell<bool>,
     bus: RefCell<Option<Rc<Bus>>>,
-    breakpoint: RefCell<Option<adw::Breakpoint>>,
+    breakpoints: RefCell<Vec<(adw::Breakpoint, Width)>>,
 }
 
 pub fn present(app: &adw::Application) {
@@ -272,9 +441,9 @@ impl Ui {
     fn build(app: &adw::Application) -> Self {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("G512 Control")
+            .title("860 Control")
             .default_width(860)
-            .default_height(640)
+            .default_height(780)
             .build();
 
         let retry = gtk::Button::builder()
@@ -286,7 +455,7 @@ impl Ui {
 
         let device_row = adw::ActionRow::new();
         device_row.add_prefix(&gtk::Image::from_icon_name("input-keyboard-symbolic"));
-        let device_group = adw::PreferencesGroup::builder().title("Device").build();
+        let device_group = adw::PreferencesGroup::builder().title("Keyboard").build();
         device_group.add(&device_row);
 
         let effect_names = gtk::StringList::new(&[]);
@@ -308,19 +477,6 @@ impl Ui {
         let brightness_row = adw::ActionRow::builder().title("Brightness").build();
         brightness_row.add_suffix(&brightness);
 
-        let keymaps_button = gtk::Button::builder()
-            .icon_name("go-next-symbolic")
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        keymaps_button.update_property(&[gtk::accessible::Property::Label("Open Key Maps")]);
-        let keymaps_row = adw::ActionRow::builder()
-            .title("Edit Key Maps…")
-            .subtitle("Colour single keys for Custom and the Gaming layout")
-            .activatable_widget(&keymaps_button)
-            .build();
-        keymaps_row.add_suffix(&keymaps_button);
-
         let lights_row = adw::SwitchRow::builder().title("Lights").build();
         let lighting_group = adw::PreferencesGroup::builder().title("Lighting").build();
         lighting_group.add(&lights_row);
@@ -328,7 +484,6 @@ impl Ui {
         lighting_group.add(&color_row);
         lighting_group.add(&speed_row);
         lighting_group.add(&brightness_row);
-        lighting_group.add(&keymaps_row);
 
         let game_row = adw::SwitchRow::builder()
             .title("Switch to Gaming Layout While a Game Runs")
@@ -336,80 +491,172 @@ impl Ui {
             .build();
         let games_group = adw::PreferencesGroup::builder().title("Games").build();
         games_group.add(&game_row);
+        let now_row = adw::ActionRow::builder().title("No game running").build();
+        let edit_gaming_row = adw::ActionRow::builder().title("Edit the Gaming Map").activatable(true).build();
+        edit_gaming_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        let now_group = adw::PreferencesGroup::builder().title("Now").build();
+        now_group.add(&now_row);
+        now_group.add(&edit_gaming_row);
 
+        let css_light = gtk::CssProvider::new();
         if let Some(display) = gdk::Display::default() {
             let css = gtk::CssProvider::new();
             css.load_from_string(APP_CSS);
             gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css_light,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+            );
         }
-        let keyboard_art = KeyboardArt::new();
-        let art_group = adw::PreferencesGroup::new();
-        art_group.add(&keyboard_art.widget);
-        let keyboard_page = Page::new(KEYBOARD_WIDTH);
-        keyboard_page.add(&art_group);
-        keyboard_page.add(&device_group);
-        keyboard_page.add(&lighting_group);
-        keyboard_page.add(&games_group);
-        let mouse_page = Page::new(MOUSE_WIDTH);
-        let mouse_art = MouseArt::new();
-        let mouse_art_group = adw::PreferencesGroup::new();
-        mouse_art_group.add(&mouse_art.widget);
-        mouse_page.add(&mouse_art_group);
-        let mouse_section = MouseSection::new();
-        mouse_page.add(&mouse_section.group);
-        mouse_page.add(&mouse_section.lighting_group);
-        let profile_section = ProfileSection::new();
-        mouse_page.add(&profile_section.group);
-        let button_section = ButtonSection::new();
-        mouse_page.add(&button_section.group);
 
-        // Each view swaps its controls for a status page while its device
-        // isn't usable; the other view keeps working.
-        let keyboard_status = StatusView::new(None);
-        let keyboard_stack = gtk::Stack::new();
-        keyboard_stack.add_named(&keyboard_status.page, Some("status"));
-        keyboard_stack.add_named(&keyboard_page.widget, Some("controls"));
-        let mouse_status = StatusView::new(None);
-        let mouse_stack = gtk::Stack::new();
-        mouse_stack.add_named(&mouse_status.page, Some("status"));
-        mouse_stack.add_named(&mouse_page.widget, Some("controls"));
+        let pages: Vec<ContentPage> = PageId::ALL.iter().map(|&id| ContentPage::new(id)).collect();
+        let page = |id: PageId| &pages[id.index()];
+        // Two groups side by side when wide, one above the other otherwise.
+        let columns = |groups: &[&adw::PreferencesGroup]| {
+            let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).homogeneous(true).build();
+            for g in groups {
+                g.set_valign(gtk::Align::Start);
+                b.append(*g);
+            }
+            b
+        };
 
-        let view_stack = adw::ViewStack::new();
-        view_stack.add_titled_with_icon(&keyboard_stack, Some("keyboard"), "Keyboard", "input-keyboard-symbolic");
-        let mouse_view = view_stack.add_titled_with_icon(&mouse_stack, Some("mouse"), "Mouse", "input-mouse-symbolic");
-        let view_switcher =
-            adw::ViewSwitcher::builder().stack(&view_stack).policy(adw::ViewSwitcherPolicy::Wide).build();
-        let switcher_bar = adw::ViewSwitcherBar::builder().stack(&view_stack).build();
-        let window_title = adw::WindowTitle::new("G512 Control", "");
-        let titles = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        titles.append(&view_switcher);
-        titles.append(&window_title);
+        // Keyboard › Lighting
+        let keyboard_art = KeyboardArt::new("Click the keyboard to edit Key Maps");
+        let keyboard_columns = columns(&[&lighting_group, &device_group]);
+        page(PageId::KbLighting).column.append(&keyboard_art.widget);
+        page(PageId::KbLighting).column.append(&keyboard_columns);
 
-        let stack = gtk::Stack::new();
-        stack.add_named(&status.page, Some("status"));
-        stack.add_named(&view_stack, Some("main"));
+        // Keyboard › Key Maps
+        let editor = Editor::new();
+        page(PageId::KbKeyMaps).column.append(&editor.widget);
 
+        // Keyboard › Games
+        let games_art = KeyboardArt::new(GAMES_HINT);
+        let games_columns = columns(&[&games_group, &now_group]);
+        page(PageId::KbGames).column.append(&games_art.widget);
+        page(PageId::KbGames).column.append(&games_columns);
         let banner = adw::Banner::new("Gaming layout active while a game runs");
         banner.set_visible(false);
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::builder().title_widget(&titles).build());
-        toolbar.add_top_bar(&banner);
-        toolbar.set_content(Some(&stack));
-        toolbar.add_bottom_bar(&switcher_bar);
-        let main_page = adw::NavigationPage::builder().title("G512 Control").tag("main").child(&toolbar).build();
+        page(PageId::KbGames).toolbar.add_top_bar(&banner);
 
-        let editor = Editor::new();
-        let nav = adw::NavigationView::new();
-        nav.add(&main_page);
-        nav.add(&editor.page);
+        // Mouse pages: the drawing beside the groups when wide, above them otherwise.
+        let mouse_row = |art: &gtk::Box, groups: &[&adw::PreferencesGroup]| {
+            let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).hexpand(true).build();
+            for g in groups {
+                column.append(*g);
+            }
+            let row = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).vexpand(true).build();
+            row.append(art);
+            row.append(&column);
+            row
+        };
+        let mouse_section = MouseSection::new();
+        let mouse_lighting_art = MouseArt::new(Badges::None);
+        let mouse_lighting_row =
+            mouse_row(&mouse_lighting_art.widget, &[&mouse_section.lighting_group, &mouse_section.group]);
+        page(PageId::MsLighting).column.append(&mouse_lighting_row);
+        let profile_section = ProfileSection::new();
+        let mouse_dpi_art = MouseArt::new(Badges::Only(DPI_BADGES));
+        let mouse_dpi_row = mouse_row(&mouse_dpi_art.widget, &[&profile_section.group, &profile_section.steps_group]);
+        page(PageId::MsDpi).column.append(&mouse_dpi_row);
+        let button_section = ButtonSection::new();
+        let mouse_buttons_art = MouseArt::new(Badges::All);
+        page(PageId::MsButtons).column.append(&mouse_buttons_art.widget);
+        button_section.set_dialog_parent(&page(PageId::MsButtons).page);
+
+        // The sidebar.
+        let rows: Vec<SidebarRow> = PageId::ALL.iter().map(|&id| SidebarRow::new(id)).collect();
+        let row = |id: PageId| &rows[id.index()];
+        let list_keyboard_art = KeyboardArt::new("");
+        let list_mouse_art = MouseArt::new(Badges::None);
+        list_mouse_art.set_min_fraction(0.3);
+        // The keyboard keeps its own height in the list; the mouse takes the rest.
+        list_keyboard_art.widget.set_vexpand(false);
+        let keyboard_section = Section::new(
+            "Keyboard",
+            "G512",
+            list_keyboard_art.widget.upcast_ref(),
+            &[row(PageId::KbLighting), row(PageId::KbKeyMaps), row(PageId::KbGames)],
+        );
+        let mouse_section_side = Section::new(
+            "Mouse",
+            "G502 HERO",
+            list_mouse_art.widget.upcast_ref(),
+            &[row(PageId::MsLighting), row(PageId::MsDpi), row(PageId::MsButtons)],
+        );
+        let separator = gtk::Separator::builder().margin_top(6).margin_bottom(6).margin_start(12).margin_end(12).build();
+        let sidebar_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_bottom(6).build();
+        sidebar_box.append(&keyboard_section.widget);
+        sidebar_box.append(&separator);
+        sidebar_box.append(&mouse_section_side.widget);
+        let sidebar_toolbar = adw::ToolbarView::new();
+        sidebar_toolbar.add_top_bar(&adw::HeaderBar::new());
+        sidebar_toolbar.set_content(Some(
+            &gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&sidebar_box).build(),
+        ));
+        let sidebar_page =
+            adw::NavigationPage::builder().title("860 Control").tag("sidebar").child(&sidebar_toolbar).build();
+        let split = adw::NavigationSplitView::builder()
+            .sidebar(&sidebar_page)
+            .content(&page(PageId::KbLighting).page)
+            .min_sidebar_width(220.0)
+            .max_sidebar_width(280.0)
+            .build();
+        // Key Maps needs the window's width for the keyboard: there, the
+        // sidebar folds away and this button slides it in over the page.
+        let fold = adw::OverlaySplitView::builder()
+            .content(&split)
+            .collapsed(true)
+            .show_sidebar(false)
+            .enable_show_gesture(false)
+            .min_sidebar_width(220.0)
+            .max_sidebar_width(280.0)
+            .build();
+        let sidebar_button = gtk::ToggleButton::builder()
+            .icon_name("sidebar-show-symbolic")
+            .tooltip_text("Show Sidebar")
+            .visible(false)
+            .build();
+        sidebar_button.bind_property("active", &fold, "show-sidebar").bidirectional().sync_create().build();
+        page(PageId::KbKeyMaps).header.pack_start(&sidebar_button);
+
+        // No device: the window is one status page.
+        let none = adw::StatusPage::builder()
+            .icon_name("input-keyboard-symbolic")
+            .title("No Devices Connected")
+            .description(
+                "Plug in the Logitech G512 keyboard or the G502 HERO mouse. Each one appears in the sidebar when it connects, and its saved lighting is applied.",
+            )
+            .build();
+        let covered = |child: &gtk::Widget| {
+            let t = adw::ToolbarView::new();
+            t.add_top_bar(&adw::HeaderBar::new());
+            t.set_content(Some(child));
+            t
+        };
+        let stack = gtk::Stack::new();
+        stack.add_named(&covered(status.page.upcast_ref()), Some("status"));
+        stack.add_named(&covered(none.upcast_ref()), Some("none"));
+        stack.add_named(&fold, Some("main"));
+        stack.set_visible_child_name("main");
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&nav));
+        toasts.set_child(Some(&stack));
         window.set_content(Some(&toasts));
 
-        // Narrow windows move the switcher to a bar at the bottom.
+        // Narrow: the sidebar becomes its own page (`Ui::update_fold`). Wide:
+        // two columns.
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 550sp").expect("valid condition"));
         window.add_breakpoint(narrow.clone());
-        let narrow_breakpoint = narrow;
+        // Three callout columns fit beside the sidebar from here.
+        let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("min-width: 720sp").expect("valid condition"));
+        window.add_breakpoint(medium.clone());
+        let wide = adw::Breakpoint::new(adw::BreakpointCondition::parse("min-width: 1000sp").expect("valid condition"));
+        window.add_breakpoint(wide.clone());
+        // The whole keyboard fits beside the sidebar from here.
+        let full = adw::Breakpoint::new(adw::BreakpointCondition::parse("min-width: 1200sp").expect("valid condition"));
+        window.add_breakpoint(full.clone());
 
         Ui {
             window,
@@ -417,17 +664,25 @@ impl Ui {
             stack,
             status,
             retry,
-            view_stack,
-            mouse_view,
-            view_switcher,
-            switcher_bar,
-            window_title,
-            keyboard_stack,
-            keyboard_status,
-            mouse_stack,
-            mouse_status,
-            narrow: Cell::new(false),
-            has_mouse: Cell::new(false),
+            split,
+            sidebar_page,
+            sidebar_toolbar,
+            fold,
+            sidebar_button,
+            pages,
+            rows,
+            keyboard_section,
+            mouse_section_side,
+            separator,
+            current: Cell::new(None),
+            keyboard_present: Cell::new(None),
+            mouse_present: Cell::new(None),
+            width: Cell::new(Width::Compact),
+            keyboard_columns,
+            games_columns,
+            mouse_lighting_row,
+            mouse_dpi_row,
+            css_light,
             device_row,
             lights_row,
             effect_row,
@@ -437,18 +692,22 @@ impl Ui {
             speed_row,
             speed,
             brightness,
-            nav,
             editor,
             mouse_section,
             profile_section,
             button_section,
-            keymaps_row,
-            keymaps_button,
             keyboard_art,
-            mouse_art,
+            games_art,
+            list_keyboard_art,
+            mouse_lighting_art,
+            mouse_dpi_art,
+            mouse_buttons_art,
+            list_mouse_art,
+            dpi_actions: RefCell::new(Vec::new()),
             gaming_shown: Cell::new(false),
-            games_group,
             game_row,
+            now_row,
+            edit_gaming_row,
             banner,
             effects: RefCell::new(Vec::new()),
             syncing: Cell::new(false),
@@ -457,34 +716,150 @@ impl Ui {
             keys_throttle: RefCell::new(Throttle::new(UPDATE_INTERVAL)),
             keys_flush_scheduled: Cell::new(false),
             bus: RefCell::new(None),
-            breakpoint: RefCell::new(None),
+            breakpoints: RefCell::new(vec![
+                (narrow, Width::Narrow),
+                (medium, Width::Medium),
+                (wide, Width::Wide),
+                (full, Width::Full),
+            ]),
         }
-        .with_breakpoint(narrow_breakpoint)
     }
 
-    /// Follow the narrow-window breakpoint to place the switcher.
-    fn with_breakpoint(self, breakpoint: adw::Breakpoint) -> Self {
-        self.breakpoint.replace(Some(breakpoint));
-        self
+    fn page(&self, id: PageId) -> &ContentPage {
+        &self.pages[id.index()]
     }
 
-    /// Show the switcher in the header, in the bottom bar when narrow, or not
-    /// at all on a service without a mouse.
-    fn update_switchers(&self) {
-        let switching = self.has_mouse.get();
-        let narrow = self.narrow.get();
-        self.view_switcher.set_visible(switching && !narrow);
-        self.switcher_bar.set_reveal(switching && narrow);
-        self.switcher_bar.set_visible(switching && narrow);
-        self.window_title.set_visible(!switching || narrow);
-        self.mouse_view.set_visible(switching);
-        if !switching {
-            self.view_stack.set_visible_child_name("keyboard");
+    fn row(&self, id: PageId) -> &SidebarRow {
+        &self.rows[id.index()]
+    }
+
+    /// Show `id` beside the sidebar (or open it, when the sidebar is its own
+    /// page), and mark its row selected.
+    fn open(&self, id: PageId) {
+        self.current.set(Some(id));
+        for r in &self.rows {
+            let current = r.id == id;
+            if current {
+                r.row.add_css_class("current");
+            } else {
+                r.row.remove_css_class("current");
+            }
+            r.row.update_state(&[gtk::accessible::State::Selected(Some(current))]);
         }
+        self.split.set_content(Some(&self.page(id).page));
+        self.split.set_show_content(true);
+        self.update_fold();
+    }
+
+    /// Fold the sidebar away on Key Maps between 550 and 1200 sp, so the
+    /// keyboard gets the window's width; otherwise put it back beside the
+    /// page, or make it its own page in a narrow window.
+    fn update_fold(&self) {
+        let width = self.width.get();
+        let folded = self.current.get() == Some(PageId::KbKeyMaps) && !matches!(width, Width::Narrow | Width::Full);
+        let in_fold = self.sidebar_toolbar.parent().as_ref() != Some(self.sidebar_page.upcast_ref());
+        let keymaps = self.page(PageId::KbKeyMaps);
+        if folded {
+            if !in_fold {
+                self.sidebar_page.set_child(None::<&gtk::Widget>);
+                self.fold.set_sidebar(Some(&self.sidebar_toolbar));
+            }
+            // The split view shows the page alone; its Back would lead to the
+            // now empty sidebar page.
+            self.split.set_collapsed(true);
+            self.split.set_show_content(true);
+            keymaps.header.set_show_back_button(false);
+            keymaps.page.set_can_pop(false);
+        } else {
+            self.fold.set_show_sidebar(false);
+            if in_fold {
+                self.fold.set_sidebar(None::<&gtk::Widget>);
+                self.sidebar_page.set_child(Some(&self.sidebar_toolbar));
+            }
+            self.split.set_collapsed(width == Width::Narrow);
+            keymaps.header.set_show_back_button(true);
+            keymaps.page.set_can_pop(true);
+        }
+        self.fold.set_enable_show_gesture(folded);
+        self.sidebar_button.set_visible(folded);
+    }
+
+    /// Whether `id`'s row can be chosen: its section is shown and the row is.
+    fn available(&self, id: PageId) -> bool {
+        let section = match id.device() {
+            Device::Keyboard => &self.keyboard_section,
+            Device::Mouse => &self.mouse_section_side,
+        };
+        section.widget.is_visible() && self.row(id).row.is_visible()
+    }
+
+    /// Lay the pages out for the window's width.
+    fn apply_width(&self, width: Width) {
+        self.width.set(width);
+        let wide = width.is_wide();
+        let narrow = width == Width::Narrow;
+        let orientation = if wide { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
+        for b in [&self.keyboard_columns, &self.games_columns, &self.mouse_lighting_row, &self.mouse_dpi_row] {
+            b.set_orientation(orientation);
+        }
+        // Beside the groups the mouse card keeps the boards' width.
+        for art in [&self.mouse_lighting_art, &self.mouse_dpi_art] {
+            art.widget.set_size_request(if wide { 460 } else { -1 }, -1);
+            art.widget.set_hexpand(!wide);
+        }
+        self.mouse_dpi_art.set_legend_beside(narrow);
+        self.mouse_dpi_art.set_caption(&dpi_caption(&self.dpi_actions.borrow(), narrow));
+        self.mouse_buttons_art.arrange(width);
+        self.editor.set_compact(width == Width::Narrow);
+        self.editor.set_key_floor(if narrow { 1.0 } else { KEY_FLOOR });
+        self.games_art.set_hint(if narrow { GAMES_HINT_NARROW } else { GAMES_HINT });
+        let margin = if matches!(width, Width::Narrow | Width::Compact) { 12 } else { 32 };
+        for p in &self.pages {
+            p.column.set_margin_start(margin);
+            p.column.set_margin_end(margin);
+        }
+        // The list page shows each device's drawing and opens pages with Back.
+        self.keyboard_section.art.set_visible(narrow);
+        self.mouse_section_side.art.set_visible(narrow);
+        self.mouse_section_side.widget.set_vexpand(narrow);
+        for r in &self.rows {
+            r.chevron.set_visible(narrow);
+        }
+        self.update_fold();
+    }
+
+    /// The light style's card colour follows the system style.
+    fn apply_style(&self) {
+        let dark = adw::StyleManager::default().is_dark();
+        self.css_light.load_from_string(if dark { "" } else { LIGHT_CSS });
     }
 
     fn connect_controls(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
+        // The folded sidebar takes focus on its open page's row when it slides
+        // in, gives it back to its button when it goes, and Escape closes it.
+        let w = weak.clone();
+        self.fold.connect_show_sidebar_notify(move |fold| {
+            let Some(ui) = w.upgrade() else { return };
+            if fold.shows_sidebar() {
+                if let Some(id) = ui.current.get() {
+                    ui.row(id).row.grab_focus();
+                }
+            } else if ui.sidebar_button.is_visible() {
+                ui.sidebar_button.grab_focus();
+            }
+        });
+        let escape = gtk::EventControllerKey::new();
+        let w = weak.clone();
+        escape.connect_key_pressed(move |_, key, _, _| {
+            let Some(ui) = w.upgrade() else { return glib::Propagation::Proceed };
+            if key == gdk::Key::Escape && ui.fold.shows_sidebar() {
+                ui.fold.set_show_sidebar(false);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        self.sidebar_toolbar.add_controller(escape);
         let on_change = move |w: &Weak<Ui>| {
             if let Some(ui) = w.upgrade() {
                 ui.user_changed();
@@ -499,22 +874,47 @@ impl Ui {
         let w = weak.clone();
         self.brightness.connect_value_changed(move |_| on_change(&w));
         let w = weak.clone();
-        self.keymaps_button.connect_clicked(move |_| {
-            if let Some(ui) = w.upgrade() {
-                if ui.selected_effect().is_some_and(|e| e.name == CUSTOM) {
-                    ui.editor.set_target(MapName::Custom);
-                }
-                ui.nav.push_by_tag("keymaps");
-            }
-        });
-        let w = weak.clone();
         self.keyboard_art.connect_activate(move || {
             if let Some(ui) = w.upgrade() {
                 // The map being shown, or Custom when neither is.
                 ui.editor.set_target(if ui.gaming_shown.get() { MapName::Gaming } else { MapName::Custom });
-                ui.nav.push_by_tag("keymaps");
+                ui.open(PageId::KbKeyMaps);
             }
         });
+        // The Games page's drawing and its "Edit the Gaming Map" row open Gaming.
+        let w = weak.clone();
+        self.games_art.connect_activate(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.editor.set_target(MapName::Gaming);
+                ui.open(PageId::KbKeyMaps);
+            }
+        });
+        let w = weak.clone();
+        self.edit_gaming_row.connect_activated(move |_| {
+            if let Some(ui) = w.upgrade() {
+                ui.editor.set_target(MapName::Gaming);
+                ui.open(PageId::KbKeyMaps);
+            }
+        });
+        let w = weak.clone();
+        self.list_keyboard_art.connect_activate(move || {
+            if let Some(ui) = w.upgrade() {
+                ui.open(PageId::KbLighting);
+            }
+        });
+        for list in [&self.keyboard_section.list, &self.mouse_section_side.list] {
+            let w = weak.clone();
+            list.connect_row_activated(move |_, row| {
+                let Some(ui) = w.upgrade() else { return };
+                if let Some(r) = ui.rows.iter().find(|r| &r.row == row) {
+                    // Opening Key Maps from the sidebar shows the Custom map while Custom is the effect.
+                    if r.id == PageId::KbKeyMaps && ui.selected_effect().is_some_and(|e| e.name == CUSTOM) {
+                        ui.editor.set_target(MapName::Custom);
+                    }
+                    ui.open(r.id);
+                }
+            });
+        }
         let w = weak.clone();
         self.lights_row.connect_active_notify(move |row| {
             let Some(ui) = w.upgrade() else { return };
@@ -584,14 +984,14 @@ impl Ui {
                 let result =
                     bus.lighting.set_mouse_button(profile, button, &action.kind, action.value, action.modifiers).await;
                 match result {
-                    Ok(_) => ui.mouse_art.confirm(usize::from(button)),
+                    Ok(_) => ui.mouse_buttons_art.confirm(usize::from(button)),
                     Err(e) => ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e))),
                 }
                 ui.refresh().await;
             });
         });
         let on_open = weak.clone();
-        self.mouse_art.connect_button(move |index| {
+        self.mouse_buttons_art.connect_button(move |index| {
             if let Some(ui) = on_open.upgrade() {
                 ui.button_section.open_dialog(index);
             }
@@ -626,24 +1026,30 @@ impl Ui {
                 }
             },
         );
-        if let Some(bp) = self.breakpoint.borrow().as_ref() {
-            for narrow in [true, false] {
-                let w = weak.clone();
-                let handler = move |_: &adw::Breakpoint| {
-                    if let Some(ui) = w.upgrade() {
-                        ui.narrow.set(narrow);
-                        ui.update_switchers();
-                        ui.mouse_art.set_compact(!narrow);
-                    }
-                };
-                if narrow {
-                    bp.connect_apply(handler);
-                } else {
-                    bp.connect_unapply(handler);
+        // Each breakpoint sets its width while it applies (the last matching one
+        // wins); from 550 to 720 sp none does, which is Compact.
+        for (bp, width) in self.breakpoints.borrow().iter() {
+            let (w, width) = (weak.clone(), *width);
+            bp.connect_apply(move |_| {
+                if let Some(ui) = w.upgrade() {
+                    ui.apply_width(width);
                 }
-            }
+            });
+            let w = weak.clone();
+            bp.connect_unapply(move |_| {
+                if let Some(ui) = w.upgrade() {
+                    ui.apply_width(Width::Compact);
+                }
+            });
         }
-        self.update_switchers();
+        self.apply_width(Width::Compact);
+        let w = weak.clone();
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(ui) = w.upgrade() {
+                ui.apply_style();
+            }
+        });
+        self.apply_style();
         let w = weak;
         self.retry.connect_clicked(move |_| {
             if let Some(ui) = w.upgrade() {
@@ -674,12 +1080,39 @@ impl Ui {
         *self.bus.borrow_mut() = Some(bus.clone());
         self.refresh().await;
         self.debug_screenshot();
-        // For the reduced-motion check: how many effect frames have been drawn.
+        // For the reduced-motion and mapped-drawings checks: how many effect
+        // frames have been drawn, and what was showing.
         if std::env::var_os("G512_CONTROL_TICK_LOG").is_some() {
-            glib::timeout_add_seconds_local(2, || {
+            let w = Rc::downgrade(&self);
+            glib::timeout_add_seconds_local(2, move || {
+                let Some(ui) = w.upgrade() else { return glib::ControlFlow::Break };
                 let animations = gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations());
                 let ticks = crate::art_area::TICKS.load(std::sync::atomic::Ordering::Relaxed);
-                eprintln!("ticks: {ticks} (animations {animations})");
+                let page = if ui.split.is_collapsed() && !ui.split.shows_content() {
+                    "list"
+                } else {
+                    ui.current.get().map_or("none", PageId::tag)
+                };
+                let mapped: Vec<&str> = [
+                    ("kb", ui.keyboard_art.widget.upcast_ref::<gtk::Widget>()),
+                    ("games", ui.games_art.widget.upcast_ref()),
+                    ("list-kb", ui.list_keyboard_art.widget.upcast_ref()),
+                    ("ms-light", ui.mouse_lighting_art.widget.upcast_ref()),
+                    ("ms-dpi", ui.mouse_dpi_art.widget.upcast_ref()),
+                    ("ms-buttons", ui.mouse_buttons_art.widget.upcast_ref()),
+                    ("list-ms", ui.list_mouse_art.widget.upcast_ref()),
+                ]
+                .into_iter()
+                .filter(|(_, w)| w.is_mapped())
+                .map(|(n, _)| n)
+                .collect();
+                let time = glib::DateTime::now_local().ok().and_then(|t| t.format("%T").ok()).unwrap_or_default();
+                eprintln!(
+                    "{time} ticks: {ticks} (animations {animations}) page {page} width {:?} {}px mapped [{}]",
+                    ui.width.get(),
+                    ui.window.width(),
+                    mapped.join(" ")
+                );
                 glib::ControlFlow::Continue
             });
         }
@@ -707,20 +1140,34 @@ impl Ui {
     }
 
     /// For checks against the design boards: with `G512_CONTROL_SCREENSHOT`
-    /// set to a PNG path, show the view named by `G512_CONTROL_VIEW` (if any)
-    /// and render the window to that file once it has drawn. `G512_CONTROL_SIZE`
-    /// (e.g. `360x800`) sizes the window first. `G512_CONTROL_FRAMES=N` saves N
-    /// frames at about 30 a second instead, to a path with `%04d` in it.
+    /// set to a PNG path, open the page tagged `G512_CONTROL_VIEW` (if any;
+    /// `list` shows the narrow sidebar list) and render the window to that
+    /// file once it has drawn. `G512_CONTROL_SIZE` (e.g. `360x800`) sizes the
+    /// window first, and `G512_CONTROL_STYLE=light` forces the light style.
+    /// `G512_CONTROL_FRAMES=N` saves N frames at about 30 a second instead, to
+    /// a path with `%04d` in it. `G512_CONTROL_SIDEBAR=1` slides the folded
+    /// sidebar in (Key Maps).
     fn debug_screenshot(&self) {
         let Ok(path) = std::env::var("G512_CONTROL_SCREENSHOT") else { return };
+        if std::env::var("G512_CONTROL_STYLE").is_ok_and(|s| s == "light") {
+            adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceLight);
+        }
         if let Ok(view) = std::env::var("G512_CONTROL_VIEW") {
-            self.view_stack.set_visible_child_name(&view);
+            match PageId::ALL.iter().find(|p| p.tag() == view) {
+                Some(&id) => self.open(id),
+                None if view == "list" => self.split.set_show_content(false),
+                None => eprintln!("no page tagged {view:?}"),
+            }
         }
         if let Some((w, h)) = std::env::var("G512_CONTROL_SIZE").ok().and_then(|s| {
             let (w, h) = s.split_once('x')?;
             Some((w.parse().ok()?, h.parse().ok()?))
         }) {
             self.window.set_default_size(w, h);
+        }
+        if std::env::var_os("G512_CONTROL_SIDEBAR").is_some() {
+            let fold = self.fold.clone();
+            glib::timeout_add_local_once(Duration::from_millis(500), move || fold.set_show_sidebar(true));
         }
         let frames: u32 = std::env::var("G512_CONTROL_FRAMES").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
         let window = self.window.clone();
@@ -742,7 +1189,8 @@ impl Ui {
             glib::timeout_add_local(Duration::from_millis(33), move || {
                 let saved = shot(&path.replace("%04d", &format!("{i:04}")));
                 i += 1;
-                if i < frames && matches!(saved, Some(Ok(()))) {
+                // A frame with nothing to render (mid page switch) is skipped, not the end.
+                if i < frames && !matches!(saved, Some(Err(_))) {
                     return glib::ControlFlow::Continue;
                 }
                 eprintln!("frames {path}: {i} saved, last {saved:?}");
@@ -759,56 +1207,109 @@ impl Ui {
                 self.show_status(Status::ServiceMissing);
             }
             Ok(Snapshot { keyboard, mouse }) => {
-                self.stack.set_visible_child_name("main");
-                self.has_mouse.set(mouse.is_some());
-                self.update_switchers();
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
                 self.button_section.show(mouse.as_deref());
                 if let Some(m) = mouse.as_deref() {
-                    let kb = match &keyboard {
-                        DeviceState::Connected { state, per_key, lights_on, .. } => {
-                            let on = lights_on.unwrap_or(true);
-                            let shown = art::shown(on, per_key.game_active, state, &per_key.custom, &per_key.gaming);
-                            Some((on, shown, state.speed))
-                        }
-                        _ => None,
-                    };
-                    let lights_on = kb.as_ref().is_none_or(|(on, ..)| *on);
-                    // A matching mouse runs at the keyboard's speed.
-                    let speed = kb.as_ref().filter(|_| m.matching).map_or(m.lighting.speed, |&(.., speed)| speed);
-                    let shown = art::mouse_shown(lights_on, m.matching, &m.lighting, kb.map(|(_, s, _)| s));
-                    let actions = m
-                        .buttons
-                        .iter()
-                        .find(|(number, _)| *number == m.active_profile)
-                        .filter(|_| m.state == "connected")
-                        .map(|(_, actions)| actions.as_slice());
-                    self.mouse_art.show(&shown, speed, actions);
+                    self.show_mouse_art(&keyboard, m);
                 }
-                match mouse.as_deref().map(|m| m.state.as_str()) {
-                    Some("connected") | None => self.mouse_stack.set_visible_child_name("controls"),
+                let mouse_state = mouse.as_deref().map(|m| m.state.as_str());
+                let mouse_present = matches!(mouse_state, Some("connected" | "permission-denied" | "unsupported"));
+                match mouse_state {
+                    Some("connected") => {
+                        self.show_device_controls(Device::Mouse);
+                        // Without profiles or buttons there's nothing for these pages.
+                        self.row(PageId::MsDpi).row.set_visible(self.profile_section.group.is_visible());
+                        self.row(PageId::MsButtons).row.set_visible(self.button_section.has_buttons());
+                    }
                     Some("permission-denied") => self.show_problem(Device::Mouse, DeviceProblem::PermissionDenied),
                     Some("unsupported") => self.show_problem(Device::Mouse, DeviceProblem::Unsupported),
-                    Some(_) => self.show_problem(Device::Mouse, DeviceProblem::Disconnected),
+                    _ => {}
                 }
+                if !matches!(mouse_state, Some("connected")) {
+                    self.row(PageId::MsDpi).row.set_visible(true);
+                    self.row(PageId::MsButtons).row.set_visible(true);
+                }
+                let keyboard_present = !matches!(keyboard, DeviceState::Disconnected);
                 match keyboard {
                     DeviceState::Connected { name, firmware, effects, state, per_key, lights_on } => {
                         self.gaming_shown.set(per_key.game_active);
-                        self.keyboard_art.show(
-                            lights_on.unwrap_or(true),
-                            per_key.game_active,
-                            &state,
-                            &per_key.custom,
-                            &per_key.gaming,
-                        );
+                        let on = lights_on.unwrap_or(true);
+                        for art in [&self.keyboard_art, &self.list_keyboard_art] {
+                            art.show(on, per_key.game_active, &state, &per_key.custom, &per_key.gaming);
+                        }
+                        self.games_art.show_gaming(&per_key.gaming);
                         self.show_lights(lights_on);
                         self.show_per_key(&effects, &per_key);
                         self.show_controls(&name, &firmware, effects, &state)
                     }
-                    DeviceState::Disconnected => self.show_problem(Device::Keyboard, DeviceProblem::Disconnected),
                     DeviceState::PermissionDenied => self.show_problem(Device::Keyboard, DeviceProblem::PermissionDenied),
                     DeviceState::Unsupported => self.show_problem(Device::Keyboard, DeviceProblem::Unsupported),
+                    DeviceState::Disconnected => {}
+                }
+                self.show_sections(keyboard_present, mouse_present);
+            }
+        }
+    }
+
+    /// The mouse drawings: what the mouse shows, and the active profile's actions.
+    fn show_mouse_art(&self, keyboard: &DeviceState, m: &Mouse) {
+        let kb = match keyboard {
+            DeviceState::Connected { state, per_key, lights_on, .. } => {
+                let on = lights_on.unwrap_or(true);
+                let shown = art::shown(on, per_key.game_active, state, &per_key.custom, &per_key.gaming);
+                Some((on, shown, state.speed))
+            }
+            _ => None,
+        };
+        let lights_on = kb.as_ref().is_none_or(|(on, ..)| *on);
+        // A matching mouse runs at the keyboard's speed.
+        let speed = kb.as_ref().filter(|_| m.matching).map_or(m.lighting.speed, |&(.., speed)| speed);
+        let shown = art::mouse_shown(lights_on, m.matching, &m.lighting, kb.map(|(_, s, _)| s));
+        let profile = m
+            .buttons
+            .iter()
+            .find(|(number, _)| *number == m.active_profile)
+            .filter(|_| m.state == "connected")
+            .map(|(number, actions)| (*number, actions.as_slice()));
+        self.mouse_lighting_art.show(&shown, speed, None);
+        self.list_mouse_art.show(&shown, speed, None);
+        self.mouse_dpi_art.show(&shown, speed, profile);
+        self.mouse_buttons_art.show(&shown, speed, profile);
+        *self.dpi_actions.borrow_mut() = profile.map(|(_, a)| a.to_vec()).unwrap_or_default();
+        self.mouse_dpi_art.set_caption(&dpi_caption(&self.dpi_actions.borrow(), self.width.get() == Width::Narrow));
+    }
+
+    /// Show the sections of the devices present, announce one that left, and
+    /// move off a page that went with it. With neither device, the window
+    /// shows "No Devices Connected".
+    fn show_sections(&self, keyboard: bool, mouse: bool) {
+        self.keyboard_section.widget.set_visible(keyboard);
+        self.mouse_section_side.widget.set_visible(mouse);
+        self.separator.set_visible(keyboard && mouse);
+        for (was, now, message) in [
+            (&self.keyboard_present, keyboard, "Keyboard disconnected"),
+            (&self.mouse_present, mouse, "Mouse disconnected"),
+        ] {
+            if was.replace(Some(now)) == Some(true) && !now {
+                self.toasts.add_toast(adw::Toast::new(message));
+            }
+        }
+        if !keyboard && !mouse {
+            self.stack.set_visible_child_name("none");
+            return;
+        }
+        self.stack.set_visible_child_name("main");
+        let current = self.current.get().filter(|&id| self.available(id));
+        if current.is_none() {
+            // The first page shown: Keyboard › Lighting, or the mouse's when
+            // only the mouse is here. In a narrow window the list stays up.
+            let showing = self.split.shows_content() || self.current.get().is_none();
+            if let Some(&id) = PageId::ALL.iter().find(|&&id| self.available(id)) {
+                let collapsed = self.width.get() == Width::Narrow;
+                self.open(id);
+                if collapsed && !showing {
+                    self.split.set_show_content(false);
                 }
             }
         }
@@ -835,21 +1336,27 @@ impl Ui {
         self.stack.set_visible_child_name("status");
     }
 
-    /// Replace one view's controls with a status page for its device.
+    /// A device that is present but not usable: each of its pages shows why.
     fn show_problem(&self, device: Device, problem: DeviceProblem) {
         let (icon, title, description, detail) = problem_text(device, problem);
-        let (view, stack) = match device {
-            Device::Keyboard => (&self.keyboard_status, &self.keyboard_stack),
-            Device::Mouse => (&self.mouse_status, &self.mouse_stack),
-        };
-        view.show(icon, title, description, &detail);
-        stack.set_visible_child_name("status");
+        for id in PageId::ALL.into_iter().filter(|id| id.device() == device) {
+            let page = self.page(id);
+            page.status.show(icon, title, description, &detail);
+            page.stack.set_visible_child_name("status");
+        }
+    }
+
+    /// A usable device: its pages show their controls.
+    fn show_device_controls(&self, device: Device) {
+        for id in PageId::ALL.into_iter().filter(|id| id.device() == device) {
+            self.page(id).stack.set_visible_child_name("controls");
+        }
     }
 
     fn show_controls(&self, name: &str, firmware: &str, effects: Vec<EffectInfo>, state: &LightingState) {
         self.device_row.set_title(name);
         self.device_row.set_subtitle(&format!("Firmware {firmware}"));
-        self.keyboard_stack.set_visible_child_name("controls");
+        self.show_device_controls(Device::Keyboard);
         // Mid-drag the controls lead; the timer re-syncs once the user stops.
         if self.throttle.borrow().busy(Instant::now()) {
             return;
@@ -877,15 +1384,22 @@ impl Ui {
         self.syncing.set(false);
     }
 
-    /// Key maps, the game switch and the banner. Hidden on a service or
-    /// keyboard without the Custom effect.
+    /// Key Maps and Games, the game switch, the Now row and the banner. The
+    /// pages are hidden on a service or keyboard without the Custom effect.
     fn show_per_key(&self, effects: &[EffectInfo], per_key: &PerKey) {
         let supported = effects.iter().any(|e| e.name == CUSTOM);
-        self.keymaps_row.set_visible(supported);
-        self.games_group.set_visible(supported);
+        self.row(PageId::KbKeyMaps).row.set_visible(supported);
+        self.row(PageId::KbGames).row.set_visible(supported);
         // Hidden as well as unrevealed, so screen readers skip it.
         self.banner.set_visible(per_key.game_active);
         self.banner.set_revealed(per_key.game_active);
+        if per_key.game_active {
+            self.now_row.set_title("Game running");
+            self.now_row.set_subtitle("The keyboard shows the Gaming map");
+        } else {
+            self.now_row.set_title("No game running");
+            self.now_row.set_subtitle("The keyboard shows its normal lighting");
+        }
         self.syncing.set(true);
         self.game_row.set_active(per_key.game_switch);
         self.syncing.set(false);
@@ -1006,5 +1520,51 @@ impl Ui {
                 ui.refresh().await;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action(kind: &str, value: u16, modifiers: u8) -> ButtonAction {
+        ButtonAction { kind: kind.into(), value, modifiers }
+    }
+
+    /// The G502's factory actions, by service index (as the fake service has them).
+    fn factory() -> Vec<ButtonAction> {
+        [("mouse", 1), ("mouse", 2), ("mouse", 4), ("mouse", 8), ("mouse", 16), ("special", 7), ("special", 4)]
+            .into_iter()
+            .chain([("special", 3), ("special", 10), ("special", 2), ("special", 1)])
+            .map(|(kind, value)| action(kind, value, 0))
+            .collect()
+    }
+
+    #[test]
+    fn dpi_caption_follows_the_buttons() {
+        let mut actions = factory();
+        assert_eq!(dpi_caption(&actions, false), "6 next profile · 7 DPI up · 8 DPI down · 9 DPI shift (sniper)");
+        assert_eq!(dpi_caption(&actions, true), "6  Next profile\n7  DPI up\n8  DPI down\n9  DPI shift (sniper)");
+        // G9 (badge 6) remapped to Ctrl+C.
+        let g9 = usize::from(HOTSPOTS.iter().find(|s| s.badge == 6).unwrap().button);
+        actions[g9] = action("key", 0x06, 1);
+        assert!(dpi_caption(&actions, false).starts_with("6 Ctrl+C · 7 DPI up"));
+        assert_eq!(dpi_caption(&[], false), "", "no buttons known");
+    }
+
+    #[test]
+    fn lower_first_keeps_acronyms() {
+        assert_eq!(lower_first("Next profile"), "next profile");
+        assert_eq!(lower_first("DPI up"), "DPI up");
+        assert_eq!(lower_first("Ctrl+C"), "Ctrl+C");
+    }
+
+    #[test]
+    fn every_page_has_its_own_tag_and_row() {
+        let tags: std::collections::HashSet<_> = PageId::ALL.iter().map(|p| p.tag()).collect();
+        assert_eq!(tags.len(), PageId::ALL.len());
+        for (i, id) in PageId::ALL.iter().enumerate() {
+            assert_eq!(id.index(), i);
+        }
     }
 }

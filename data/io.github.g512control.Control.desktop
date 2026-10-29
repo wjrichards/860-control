@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=G512 Control
-Comment=Set the lighting of a Logitech G512 keyboard
+Name=860 Control
+Comment=Lighting, DPI and buttons for Logitech gaming keyboards and mice
 Exec=g512-control
 Icon=io.github.g512control.Control
 Terminal=false
 Type=Application
 Categories=Settings;HardwareSettings;GTK;GNOME;
-Keywords=keyboard;rgb;lighting;backlight;logitech;g512;
+Keywords=keyboard;mouse;rgb;lighting;backlight;dpi;gaming;logitech;g512;g502;
 StartupNotify=true

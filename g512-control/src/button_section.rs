@@ -1,8 +1,7 @@
-//! The Mouse view's Buttons group: what each button of the active profile does,
-//! and the Change dialog for it. Left click can't be changed.
-//!
-//! All rows are built once and shown or hidden as the mouse needs; rows
-//! added later would not reach the accessibility tree.
+//! The active profile's button actions, and the Change dialog for each
+//! button. Left click can't be changed. The Buttons page shows the buttons as
+//! callouts on the mouse drawing; this keeps what they do and opens the
+//! dialog over `dialog_parent`.
 
 use std::{
     cell::{Cell, RefCell},
@@ -29,6 +28,8 @@ struct ButtonRow {
 pub struct ButtonSection {
     pub group: adw::PreferencesGroup,
     rows: Vec<ButtonRow>,
+    /// What the Change dialog opens over.
+    dialog_parent: RefCell<Option<gtk::Widget>>,
     actions: RefCell<Vec<ButtonAction>>,
     profile: Cell<u8>,
     on_set: Handler<(u8, u8, ButtonAction)>,
@@ -55,6 +56,7 @@ impl ButtonSection {
         let section = Rc::new(ButtonSection {
             group,
             rows,
+            dialog_parent: RefCell::new(None),
             actions: RefCell::new(Vec::new()),
             profile: Cell::new(0),
             on_set: RefCell::new(None),
@@ -69,6 +71,16 @@ impl ButtonSection {
             });
         }
         section
+    }
+
+    /// The widget the Change dialog opens over (it must be in the window).
+    pub fn set_dialog_parent(&self, parent: &impl IsA<gtk::Widget>) {
+        *self.dialog_parent.borrow_mut() = Some(parent.clone().upcast());
+    }
+
+    /// Whether the active profile's buttons are known (the Buttons page has something to show).
+    pub fn has_buttons(&self) -> bool {
+        self.group.is_visible()
     }
 
     /// `on_set` changes one button: (profile, button, action).
@@ -110,6 +122,7 @@ impl ButtonSection {
                 f((profile, index as u8, action));
             }
         });
-        dialog.dialog.present(Some(&self.group));
+        let parent = self.dialog_parent.borrow().clone().unwrap_or_else(|| self.group.clone().upcast());
+        dialog.dialog.present(Some(&parent));
     }
 }

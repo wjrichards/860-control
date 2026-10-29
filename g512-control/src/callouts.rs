@@ -1,4 +1,4 @@
-//! The callouts beside the mouse drawing: one button per mouse button, in
+//! The callouts beside or below the mouse drawing on the Buttons page: one button per mouse button, in
 //! badge order, showing the badge number, the button's name and what it
 //! does in the active profile. Activating one opens its Change dialog;
 //! Left Click is fixed and insensitive.
@@ -56,8 +56,7 @@ impl Callouts {
                 let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
                 text.append(&title);
                 text.append(&action);
-                let button =
-                    gtk::Button::builder().child(&text).halign(gtk::Align::Start).css_classes(["callout"]).build();
+                let button = gtk::Button::builder().child(&text).css_classes(["callout"]).build();
                 if index == 0 {
                     button.set_sensitive(false);
                     button.add_css_class("callout-fixed");
@@ -92,7 +91,7 @@ impl Callouts {
             item.button.add_controller(motion);
             item.button.add_controller(focus);
         }
-        callouts.arrange(true);
+        callouts.arrange(2, true);
         callouts
     }
 
@@ -107,15 +106,16 @@ impl Callouts {
         *self.on_open.borrow_mut() = Some(Box::new(f));
     }
 
-    /// Two columns: badges 1–6 down the first and 7–11 down the second
-    /// (`column_major`, beside the drawing), or across in pairs (below it).
-    pub fn arrange(&self, column_major: bool) {
-        let rows = self.items.len().div_ceil(2);
+    /// `columns` columns, badges running down each (`column_major`: 1–6 then
+    /// 7–11 beside the drawing) or across the rows (below it).
+    pub fn arrange(&self, columns: usize, column_major: bool) {
+        let columns = columns.max(1);
+        let rows = self.items.len().div_ceil(columns);
         for (i, item) in self.items.iter().enumerate() {
             if item.button.parent().is_some() {
                 self.grid.remove(&item.button);
             }
-            let (column, row) = if column_major { (i / rows, i % rows) } else { (i % 2, i / 2) };
+            let (column, row) = if column_major { (i / rows, i % rows) } else { (i % columns, i / columns) };
             self.grid.attach(&item.button, column as i32, row as i32, 1, 1);
         }
     }

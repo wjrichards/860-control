@@ -1,7 +1,7 @@
 {
   "uuid": "g512-control@g512control.github.io",
-  "name": "G512 Keyboard Lighting",
+  "name": "860 Control Quick Settings",
   "description": "A Quick Settings tile for the g512d lighting service: lights on and off, effect, brightness and the gaming layout switch.",
   "shell-version": ["50"],
-  "url": "http://192.168.8.222:3002/wjrichards/g512-control"
+  "url": "https://github.com/wjrichards/860-control"
 }

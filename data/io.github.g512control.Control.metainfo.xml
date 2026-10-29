@@ -3,15 +3,22 @@
   <id>io.github.g512control.Control</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>G512 Control</name>
-  <summary>Set the lighting of a Logitech G512 keyboard</summary>
+  <name>860 Control</name>
+  <summary>Gaming peripheral center for GNOME</summary>
   <description>
     <p>
-      Choose the G512 RGB keyboard's lighting effect, colour, speed and brightness.
-      The app talks to the g512d lighting service, which owns the keyboard and keeps
-      the lighting after replugs and suspend.
+      860 Control brings the features of gaming keyboards and mice to the GNOME
+      desktop, where the system has no settings for them.
+    </p>
+    <p>
+      For the Logitech G512 keyboard: lighting effects, per-key Custom and Gaming
+      key maps, and the Gaming map while a game runs. For the G502 HERO mouse:
+      lighting, DPI steps, report rate, onboard profiles and button actions.
+      The app talks to the g512d service, which owns the devices and keeps their
+      settings after replugs and suspend.
     </p>
   </description>
+  <url type="homepage">https://github.com/wjrichards/860-control</url>
   <developer id="io.github.g512control">
     <name>wrichards</name>
   </developer>

@@ -1,4 +1,4 @@
-//! The Mouse view's Device and Lighting groups: the G502 HERO's status, then
+//! Mouse › Lighting's Device and Lighting groups: the G502 HERO's status, then
 //! Match Keyboard and its own lighting while it isn't matching.
 
 use std::{

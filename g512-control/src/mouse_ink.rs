@@ -1,9 +1,10 @@
 //! The G502 HERO ink drawings (`data/g502-top-ink.svg`, `g502-side-ink.svg`,
 //! provided by the user) read into layers of path commands for Cairo.
 //!
-//! Each file has groups `Glow`, `Layer_5`, `DPI_LEDs` and `Logo`, with
-//! classes `cls-1` (glow), `cls-2` (outline, drawn as filled shapes) and
-//! `cls-3` (LEDs and logo). The paths use only M, L, C and Z.
+//! Each file sorts its paths into groups: `Layer_5` (the outline, drawn as
+//! filled shapes), `DPI_LEDs` and `Logo`, plus an empty `Glow`. Fills are
+//! inline and ignored: the app colours each layer itself. The paths use only
+//! M, L, C and Z.
 
 pub const TOP_SVG: &str = include_str!("../data/g502-top-ink.svg");
 pub const SIDE_SVG: &str = include_str!("../data/g502-side-ink.svg");
@@ -27,7 +28,6 @@ pub type Path = Vec<Cmd>;
 pub struct Ink {
     pub width: f64,
     pub height: f64,
-    pub glow: Vec<Path>,
     pub outline: Vec<Path>,
     pub leds: Vec<Path>,
     pub logo: Vec<Path>,
@@ -101,13 +101,14 @@ pub fn parse(svg: &str) -> Result<Ink, String> {
             let d = attr(tag, "d").ok_or("path without d")?;
             let path = parse_path(d)?;
             let group = groups.iter().rev().flatten().next().copied();
-            match (attr(tag, "class"), group) {
-                (Some("cls-1"), _) => ink.glow.push(path),
-                (Some("cls-2"), _) => ink.outline.push(path),
-                (Some("cls-3"), Some("DPI_LEDs")) => ink.leds.push(path),
-                (Some("cls-3"), _) if width_of(&path) < LED_MAX_WIDTH => ink.leds.push(path),
-                (Some("cls-3"), _) => ink.logo.push(path),
-                (class, _) => return Err(format!("unknown class {class:?}")),
+            match group {
+                Some("Layer_5") => ink.outline.push(path),
+                Some("DPI_LEDs") => ink.leds.push(path),
+                Some("Logo") if width_of(&path) < LED_MAX_WIDTH => ink.leds.push(path),
+                Some("Logo") => ink.logo.push(path),
+                // The glow layer is gone; any shape left in it isn't drawn.
+                Some("Glow") => {}
+                group => return Err(format!("unknown group {group:?}")),
             }
         }
     }
@@ -134,10 +135,10 @@ mod tests {
     fn both_files_parse_into_their_layers() {
         let top = parse(TOP_SVG).unwrap();
         assert_eq!((top.width.round(), top.height.round()), (425.0, 767.0));
-        assert_eq!((top.outline.len(), top.leds.len(), top.logo.len(), top.glow.len()), (52, 3, 1, 2));
+        assert_eq!((top.outline.len(), top.leds.len(), top.logo.len()), (52, 3, 1));
         let side = parse(SIDE_SVG).unwrap();
         assert_eq!((side.width.round(), side.height.round()), (770.0, 250.0));
-        assert_eq!((side.outline.len(), side.leds.len(), side.logo.len(), side.glow.len()), (41, 3, 1, 2));
+        assert_eq!((side.outline.len(), side.leds.len(), side.logo.len()), (41, 3, 1));
     }
 
     #[test]
@@ -151,8 +152,14 @@ mod tests {
     }
 
     #[test]
-    fn unknown_class_is_an_error() {
-        let svg = r#"<svg viewBox="0 0 10 10"><g id="Layer_5"><path d="M0 0 L1 1 Z" class="cls-9"/></g></svg>"#;
-        assert!(parse(svg).unwrap_err().contains("unknown class"));
+    fn unknown_group_is_an_error() {
+        let svg = r##"<svg viewBox="0 0 10 10"><g id="Shading"><path d="M0 0 L1 1 Z" fill="#0e0e10"/></g></svg>"##;
+        assert!(parse(svg).unwrap_err().contains("unknown group"));
+    }
+
+    #[test]
+    fn inline_fills_are_ignored() {
+        let svg = r##"<svg viewBox="0 0 10 10"><g id="Layer_5"><path fill="#0e0e10" d="M0 0 L1 1 Z"/></g></svg>"##;
+        assert_eq!(parse(svg).unwrap().outline.len(), 1);
     }
 }
