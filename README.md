@@ -73,6 +73,20 @@ It is a GNOME Shell extension for GNOME 50.
 
 The tile hides itself while `g512d` isn't running, and never starts it. After a GNOME upgrade beyond version 50, the Shell turns the tile off until the extension is updated.
 
+## The app
+
+The app has two views, **Keyboard** and **Mouse**, switched at the top of the window, or at the bottom when the window is narrow. The Mouse view appears when the service supports a G502 HERO. Each view shows its own device's state: if the keyboard is unplugged, the Keyboard view says so and the Mouse view keeps working, and the other way round.
+
+Each view opens with a drawing of its device in its current lighting:
+- **The keyboard** shows lit keys as tiles in their colour and unlit keys as outlines: the effect's colour, or the key map being shown. Click it, or press Enter on it, to open **Key Maps**; **Edit Key Maps…** below does the same.
+- **The mouse** is drawn from above and from the side, in its lighting colour, with the G logo and DPI LEDs lit. A number marks each programmable button, and the list beside the drawing (below it in a narrow window) shows what each one does in the active profile. Click a button on the drawing, or its entry in the list, to change it. Left click is shown as fixed.
+
+Colours too dark to see against the drawing's background are lightened, keeping their hue. With the lights off, the drawings are dim outlines.
+
+While GNOME's animations are on, the drawings play the current effect: Ripple's ring, Wave's band, Breathe's fade and Cycle's colour, at the effect's speed. Pointing at a mouse button fills it and sends a ring out, and applying a change pulses it once. With **Reduce Animation** on (Settings → Accessibility), the drawings stay still and nothing pulses.
+
+The mouse drawings are the project's own ink drawings of the G502 HERO, in `g512-control/data/g502-top-ink.svg` and `g502-side-ink.svg`. The app reads their paths at start-up and colours them itself.
+
 ## Lights on and off
 
 **Lights** in the app, or clicking the tile, turns the keyboard dark without forgetting anything. Turning the lights back on shows your effect again, or the Gaming layout if a game is running.
@@ -83,7 +97,7 @@ The tile hides itself while `g512d` isn't running, and never starts it. After a 
 
 ## Mouse
 
-The **Mouse** section of the app appears when the service supports a G502 HERO. With **Match Keyboard** on, which is the default, the logo and DPI strip follow the keyboard's lighting and brightness. The mouse has only Off, Static, Breathe and Cycle, so it shows the nearest one:
+The app's **Mouse** view appears when the service supports a G502 HERO. With **Match Keyboard** on, which is the default, the logo and DPI strip follow the keyboard's lighting and brightness. The mouse has only Off, Static, Breathe and Cycle, so it shows the nearest one:
 - **Wave** becomes Cycle at the same speed.
 - **Ripple** becomes Static in Ripple's colour.
 - **The Custom map, or the Gaming map during a game,** becomes Static in the colour that map gives W, or Off if W is off.
@@ -94,7 +108,7 @@ The mouse stays in its own onboard-profile mode, so its DPI buttons keep working
 
 ### DPI, report rate and profiles
 
-The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The **Mouse Profile** section shows the active profile:
+The mouse stores five profiles, each with a report rate and up to five DPI steps. Its DPI buttons cycle through the active profile's steps. The Mouse view's **Profile** group shows the active profile:
 - **Profile:** choosing one makes it active. The mouse switches to its DPI and report rate straight away. G9, the button behind the wheel, also switches profiles on the mouse; the app follows within about 2 seconds.
 - **Report Rate:** 125, 250, 500 or 1000 Hz.
 - **DPI steps:** 1 to 5 steps from 100 to 25,600 DPI, in steps of 50. The radio button marks the step the mouse starts on; the remove button deletes a step; **Add Step** adds one.
@@ -111,7 +125,7 @@ Only the report rate, DPI steps and default step are changed here. Button assign
 
 ### Buttons
 
-The **Mouse Buttons** section lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. **Change** opens a dialog with:
+The **Buttons** group lists what each button does in the active profile: Right Click, Wheel Click, Back and Forward (the thumb buttons), Sniper, DPI Down, DPI Up, G9, and Wheel Tilt Right and Left. The same list sits beside the mouse drawing, numbered to match it. **Change**, a button in that list, or the button itself on the drawing opens a dialog with:
 - **Mouse Button:** left, right or middle click, back or forward;
 - **Keyboard Shortcut:** choose **Set Shortcut**, then press the keys, for example Ctrl+C. Esc cancels. Letters, digits, F1 to F12, Enter, Tab, Space, Backspace, punctuation, the arrows and Insert, Delete, Home, End, Page Up and Page Down work; the dialog says when a key can't be used;
 - **Media Key:** play/pause, next and previous track, volume up and down, mute;
@@ -124,7 +138,7 @@ If G9 no longer switches profiles, the app's **Profile** row still does.
 
 ## Key maps
 
-**Key Maps** in the app opens a drawing of the keyboard. Choose **Custom** or **Gaming** at the top to pick which map you are editing.
+Clicking the keyboard drawing, or **Edit Key Maps…**, opens **Key Maps**, a drawing of the keyboard to edit. Choose **Custom** or **Gaming** at the top to pick which map you are editing.
 
 - Click keys to select them, or drag across them. The buttons above the keyboard select groups: WASD, the arrows, the F-keys, the number row, the numpad or the modifiers.
 - Pick a colour, then **Paint Selected**. **Turn Off** leaves the selected keys dark.

@@ -1,4 +1,4 @@
-//! The Mouse Profile group: which onboard profile is active, and its report
+//! The Mouse view's Profile group: which onboard profile is active, and its report
 //! rate and DPI steps. Edits are written to the mouse once the user has
 //! stopped changing them for [`SAVE_DELAY`], as one request.
 //!
@@ -55,7 +55,7 @@ impl ProfileSection {
             adw::ComboRow::builder().title("Report Rate").model(&gtk::StringList::new(&rate_names)).build();
         let add_row = adw::ButtonRow::builder().title("Add Step").start_icon_name("list-add-symbolic").build();
         let group = adw::PreferencesGroup::builder()
-            .title("Mouse Profile")
+            .title("Profile")
             .description("Stored on the mouse: its DPI buttons cycle through these steps")
             .visible(false)
             .build();
