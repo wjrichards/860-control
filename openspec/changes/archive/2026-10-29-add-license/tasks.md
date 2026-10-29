@@ -30,4 +30,4 @@
   - the README section.
 
   Done when `appstreamcli validate --no-net data/io.github.g512control.Control.metainfo.xml` still passes and `grep -rn "license" Cargo.toml */Cargo.toml` shows only GPL-3.0-or-later.
-- [ ] 4.2 After the merge, push `main` to the `github` and `gitlab` remotes. Done when both repo pages show "GPL-3.0" as the licence.
+- [x] 4.2 After the merge, push `main` to the `github` and `gitlab` remotes. Done when both repo pages show "GPL-3.0" as the licence.
