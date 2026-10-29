@@ -1,8 +1,12 @@
 # 860 Control
 
-A gaming peripheral center for GNOME desktops. Its mission is to bridge the gap between what the system supports and what the hardware can do.
+A gaming peripheral center for GNOME desktops. Its goal is to bridge some of the gap between what the system supports and what the hardware can do.
+
+> **Alpha software.** It works day to day on the author's own devices, but expect rough edges and changes between versions. It writes lighting to the devices' RAM and mouse profiles to the mouse's flash, after saving a backup; read [Things to know](#things-to-know) before using it.
 
 Today it covers the Logitech G512 RGB keyboard (USB `046d:c33c`) and G502 HERO mouse (`046d:c08b`). The code, packages, app id and D-Bus names keep the project's original name, `g512-control`.
+
+![860 Control showing the keyboard's Lighting page: a drawing of the G512 lit in a rainbow Custom map above the Lighting and Keyboard settings, with the device sidebar on the left](docs/screenshots/keyboard-lighting.png)
 
 It has four parts:
 
@@ -81,11 +85,25 @@ The app has a sidebar like GNOME Settings, with a section for each device it fin
 - **Keyboard:** Lighting, Key Maps and Games.
 - **Mouse:** Lighting, DPI & Profiles and Buttons. It appears when the service supports a G502 HERO.
 
+| | |
+|---|---|
+| ![Key Maps: the keyboard's keys in their Custom colours, with group buttons and paint actions below](docs/screenshots/key-maps.png) | ![Games: the Gaming map drawing, the game switch and the Now group](docs/screenshots/games.png) |
+| **Key Maps** | **Games** |
+| ![Buttons: the G502 HERO drawn from above and the side with numbered buttons, and what each does in profile 4](docs/screenshots/mouse-buttons.png) | ![DPI & Profiles: the mouse with its DPI buttons numbered, the profile and report rate, and the DPI steps](docs/screenshots/mouse-dpi.png) |
+| **Mouse › Buttons** | **Mouse › DPI & Profiles** |
+| ![Mouse Lighting: the mouse drawn in the keyboard's colour, with Match Keyboard on](docs/screenshots/mouse-lighting.png) | ![The keyboard's Lighting page in the light style, on a light drawing card](docs/screenshots/light.png) |
+| **Mouse › Lighting** | **Light style** |
+
 A device's section is there only while the device is plugged in. Unplug the mouse while one of its pages is open and the app moves to the keyboard's Lighting page and says "Mouse disconnected"; with neither device plugged in, the window says **No Devices Connected**. A device that is plugged in but can't be used (no access, or unsupported) keeps its section, and its pages explain why.
 
 In a narrow window the sidebar becomes its own page, with a drawing of each device under its name; choosing a page opens it with a Back button. In a wide window the settings sit in two columns. The window opens at 860 × 780.
 
 On **Key Maps**, until the window is wide enough for the keyboard beside the sidebar (about 1200 px), the sidebar folds away; the button at the top left slides it back in over the page.
+
+| | |
+|---|---|
+| ![Key Maps at 860 pixels wide: the sidebar folded behind a button in the header, and the whole keyboard at full size](docs/screenshots/key-maps-860.png) | ![A 360 pixel wide window: the sidebar as its own page, with the keyboard and mouse drawn under their names](docs/screenshots/narrow.png) |
+| **Key Maps at 860 px**, sidebar folded | **Narrow window** |
 
 Pages show a drawing of their device in its current lighting, on a card that takes the room the settings leave:
 - **The keyboard** shows lit keys as tiles in their colour and unlit keys as outlines: the effect's colour, or the key map being shown. Click it, or press Enter on it, to open **Key Maps**.
@@ -306,3 +324,15 @@ flatpak build-init --sdk-extension=org.freedesktop.Sdk.Extension.rust-stable --b
 flatpak build --share=network --filesystem="$PWD" --env=PATH=/usr/lib/sdk/rust-stable/bin:/usr/bin:/bin \
     --env=CARGO_TARGET_DIR="$PWD/target/flatpak" /tmp/g512-sdk cargo test --workspace
 ```
+
+The screenshots in `docs/screenshots/` come from a debug build run against the tile's fake service under a test bus name, so they don't touch the real service or devices. The app's screenshot hook opens a page and saves the window once it has drawn:
+
+```sh
+python3 gnome-extension/tests/fake_service.py --name io.github.g512control.Lighting1Test &
+flatpak run --filesystem="$PWD" --talk-name=io.github.g512control.Lighting1Test \
+    --env=G512_CONTROL_BUS_NAME=io.github.g512control.Lighting1Test \
+    --env=G512_CONTROL_SCREENSHOT="$PWD/shot.png" --env=G512_CONTROL_VIEW=keymaps --env=G512_CONTROL_SIZE=1280x800 \
+    --command="$PWD/target/flatpak/debug/g512-control" io.github.g512control.Control
+```
+
+`G512_CONTROL_VIEW` takes a page tag (`keyboard-lighting`, `keymaps`, `games`, `mouse-lighting`, `dpi`, `buttons`) or `list`; `G512_CONTROL_STYLE=light` forces the light style. The rainbow Custom map was set on the fake service with its `io.github.g512control.Test.Set` method.
