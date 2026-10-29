@@ -16,7 +16,7 @@ Later, other Linux users with Logitech HID++ devices, once it's shared (Gitea no
 
 ## Product Purpose
 
-860 Control is a gaming peripheral center for GNOME desktops; its mission is to bridge the gap between what the system supports and what the hardware can do. Today it sets the lighting of the G512 and the G502 HERO, the mouse's DPI, report rate and onboard profiles, and the mouse's button actions, from a GNOME app and a Quick Settings tile. Success: the devices look and behave the way the user set them, and stay that way across replugs, suspend and login, without a vendor app.
+860 Control is a gaming peripheral center for GNOME desktops; its goal is to bridge some of the gap between what the system supports and what the hardware can do. It is alpha software. Today it sets the lighting of the G512 and the G502 HERO, the mouse's DPI, report rate and onboard profiles, and the mouse's button actions, from a GNOME app and a Quick Settings tile. Success: the devices look and behave the way the user set them, and stay that way across replugs, suspend and login, without a vendor app.
 
 ## Positioning
 
