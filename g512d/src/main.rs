@@ -7,6 +7,7 @@ mod dbus;
 mod events;
 mod gamemode;
 mod keymap;
+mod macros;
 mod mouse;
 mod profile_backup;
 mod state;
@@ -109,7 +110,7 @@ fn main() -> ExitCode {
 }
 
 /// The unique bus name currently owning ours, for the "already running" message.
-/// Write the user profile sectors from a backup file back to the mouse.
+/// Write the user profile or macro sectors from a backup file back to the mouse.
 /// Runs alongside the service; both can talk to the mouse.
 fn restore_mouse_profiles(file: &str) -> ExitCode {
     let text = match std::fs::read_to_string(file) {

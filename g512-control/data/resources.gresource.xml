@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The app's own icons. GtkApplication adds <resource base path>/icons to the
+     icon theme, so these are found by name. -->
+<gresources>
+  <gresource prefix="/io/github/g512control/Control/icons/scalable/actions">
+    <file preprocess="xml-stripblanks">g512-macros-symbolic.svg</file>
+  </gresource>
+</gresources>

@@ -10,9 +10,11 @@ use std::{
     time::Duration,
 };
 
-use crate::Transport;
+use crate::{Transport, profiles::crc};
 
 const ERR_INVALID_ARGUMENT: u8 = 0x02;
+/// What the real mouse answers `memoryWriteEnd` with when the CRC is wrong (spike 10).
+const ERR_HARDWARE: u8 = 0x04;
 const ERR_INVALID_FEATURE_INDEX: u8 = 0x06;
 const ERR_INVALID_FUNCTION_ID: u8 = 0x07;
 
@@ -307,6 +309,9 @@ impl FakeKeyboard {
                 None => err(ERR_INVALID_ARGUMENT),
             },
             (0x8100, 8) => match self.pending_write.take() {
+                Some((_, data)) if data.len() == 256 && crc(&data[..254]) != u16::from_be_bytes([data[254], data[255]]) => {
+                    err(ERR_HARDWARE)
+                }
                 Some((sector, mut data)) if data.len() == 256 => {
                     if std::mem::take(&mut self.corrupt_next_write) {
                         data[20] ^= 0xff;
@@ -322,8 +327,9 @@ impl FakeKeyboard {
     }
 }
 
-/// The mouse's sectors 0-5 from spike 6, then ten empty user sectors and
-/// a stand-in ROM sector.
+/// The mouse's sectors 0-5 from spike 6, then ten free macro sectors (all
+/// zeros with no valid CRC, as on the real mouse, spike 10) and a stand-in
+/// ROM sector.
 fn g502_hero_memory() -> BTreeMap<u16, Vec<u8>> {
     let mut memory: BTreeMap<u16, Vec<u8>> = include_str!("fixtures/g502_hero_profiles.txt")
         .lines()

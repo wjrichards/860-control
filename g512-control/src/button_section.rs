@@ -12,9 +12,14 @@ use adw::prelude::*;
 
 use crate::{
     button_actions::{button_name, describe},
-    change_dialog::{ChangeDialog, Handler},
+    change_dialog::{ChangeDialog, Handler, MacroChoices},
+    macro_steps,
     service::{ButtonAction, Mouse},
 };
+
+/// Asks the window for a new macro: the widget to open the editor over, and
+/// what to do with the new macro's sector once saved.
+type NewMacro = RefCell<Option<Box<dyn Fn(gtk::Widget, Box<dyn Fn(u8)>)>>>;
 
 /// Room for the most buttons a profile can hold.
 const MAX_BUTTONS: usize = 16;
@@ -32,7 +37,10 @@ pub struct ButtonSection {
     dialog_parent: RefCell<Option<gtk::Widget>>,
     actions: RefCell<Vec<ButtonAction>>,
     profile: Cell<u8>,
+    /// The macros a button can play; `None` on a service without macros.
+    macros: RefCell<Option<MacroChoices>>,
     on_set: Handler<(u8, u8, ButtonAction)>,
+    on_new_macro: NewMacro,
 }
 
 impl ButtonSection {
@@ -59,7 +67,9 @@ impl ButtonSection {
             dialog_parent: RefCell::new(None),
             actions: RefCell::new(Vec::new()),
             profile: Cell::new(0),
+            macros: RefCell::new(None),
             on_set: RefCell::new(None),
+            on_new_macro: RefCell::new(None),
         });
         for (i, r) in section.rows.iter().enumerate() {
             let Some(change) = &r.change else { continue };
@@ -88,8 +98,17 @@ impl ButtonSection {
         *self.on_set.borrow_mut() = Some(Box::new(on_set));
     }
 
+    /// `f(parent, then)` opens the macro editor for "New Macro…" in a Change
+    /// dialog, and calls `then` with the new macro's sector once it's saved.
+    pub fn connect_new_macro(&self, f: impl Fn(gtk::Widget, Box<dyn Fn(u8)>) + 'static) {
+        *self.on_new_macro.borrow_mut() = Some(Box::new(f));
+    }
+
     /// The service's view of the mouse: the active profile's buttons.
     pub fn show(&self, mouse: Option<&Mouse>) {
+        *self.macros.borrow_mut() = mouse
+            .and_then(|m| m.macros.as_ref())
+            .map(|macros| macros.iter().map(|m| (m.sector, macro_steps::title(m))).collect());
         let active = mouse
             .filter(|m| m.state == "connected")
             .and_then(|m| m.buttons.iter().find(|(number, _)| *number == m.active_profile));
@@ -113,7 +132,20 @@ impl ButtonSection {
     /// rows, the callouts and the mouse drawing all come here).
     pub fn open_dialog(self: &Rc<Self>, index: usize) {
         let Some(current) = self.actions.borrow().get(index).cloned() else { return };
-        let dialog = ChangeDialog::new(&button_name(index), &current);
+        let dialog = ChangeDialog::new(&button_name(index), &current, self.macros.borrow().clone());
+        let (weak, weak_dialog) = (Rc::downgrade(self), Rc::downgrade(&dialog));
+        dialog.connect_new_macro(move |()| {
+            let (Some(s), Some(d)) = (weak.upgrade(), weak_dialog.upgrade()) else { return };
+            let (back, back_dialog) = (Rc::downgrade(&s), Rc::downgrade(&d));
+            let then: Box<dyn Fn(u8)> = Box::new(move |sector| {
+                if let (Some(s), Some(d)) = (back.upgrade(), back_dialog.upgrade()) {
+                    d.set_macros(s.macros.borrow().clone().unwrap_or_default(), Some(sector));
+                }
+            });
+            if let Some(f) = s.on_new_macro.borrow().as_ref() {
+                f(d.dialog.clone().upcast(), then);
+            }
+        });
         let weak = Rc::downgrade(self);
         let profile = self.profile.get();
         dialog.connect_apply(move |action| {

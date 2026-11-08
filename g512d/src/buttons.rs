@@ -1,15 +1,15 @@
 //! Mouse button actions as front ends send and see them: (kind, value,
 //! modifiers), where the kind is `mouse`, `key`, `media`, `special`,
-//! `disabled` or `other` (D3).
+//! `macro` (the value is the macro's sector), `disabled` or `other` (D3).
 
 use g512_hidpp::profiles::{ButtonAction, Special};
 
 /// Mouse buttons a button can act as: left, right, middle, back, forward.
-const MOUSE_BUTTONS: [u16; 5] = [1, 2, 4, 8, 16];
+pub(crate) const MOUSE_BUTTONS: [u16; 5] = [1, 2, 4, 8, 16];
 /// Keyboard usages from `a` to right GUI.
-const KEY_USAGES: std::ops::RangeInclusive<u16> = 0x04..=0xe7;
+pub(crate) const KEY_USAGES: std::ops::RangeInclusive<u16> = 0x04..=0xe7;
 /// Consumer usages, e.g. `0x00e9` Volume Up (spike 9) or `0x00cd` Play/Pause.
-const MEDIA_USAGES: std::ops::RangeInclusive<u16> = 0x0001..=0x0fff;
+pub(crate) const MEDIA_USAGES: std::ops::RangeInclusive<u16> = 0x0001..=0x0fff;
 
 /// An action as sent on the bus.
 pub fn to_bus(action: ButtonAction) -> (&'static str, u16, u8) {
@@ -18,12 +18,15 @@ pub fn to_bus(action: ButtonAction) -> (&'static str, u16, u8) {
         ButtonAction::Key { modifiers, usage } => ("key", u16::from(usage), modifiers),
         ButtonAction::Media(usage) => ("media", usage, 0),
         ButtonAction::Special(s) => ("special", u16::from(s as u8), 0),
+        ButtonAction::Macro { sector, .. } => ("macro", u16::from(sector), 0),
         ButtonAction::Disabled => ("disabled", 0, 0),
         ButtonAction::Other(_) => ("other", 0, 0),
     }
 }
 
 /// An action from the bus; anything the mouse shouldn't be given is refused.
+/// A `macro` names its sector; whether that sector holds a macro is the
+/// controller's to check.
 pub fn from_bus(kind: &str, value: u16, modifiers: u8) -> Result<ButtonAction, String> {
     if kind != "key" && modifiers != 0 {
         return Err(format!("modifiers only go with a key, not {kind:?}"));
@@ -38,9 +41,14 @@ pub fn from_bus(kind: &str, value: u16, modifiers: u8) -> Result<ButtonAction, S
             .map(ButtonAction::Special)
             .ok_or_else(|| format!("no mouse function {value:#04x}")),
         "disabled" if value == 0 => Ok(ButtonAction::Disabled),
+        "macro" => u8::try_from(value)
+            .ok()
+            .filter(|&s| s != 0)
+            .map(|sector| ButtonAction::Macro { sector, offset: 0 })
+            .ok_or_else(|| format!("no macro sector {value}")),
         "mouse" | "key" | "media" | "disabled" => Err(format!("{value:#06x} is not a valid {kind} value")),
         "other" => Err("\"other\" entries can't be written".into()),
-        _ => Err(format!("unknown kind {kind:?}; use mouse, key, media, special or disabled")),
+        _ => Err(format!("unknown kind {kind:?}; use mouse, key, media, special, macro or disabled")),
     }
 }
 
@@ -56,6 +64,7 @@ mod tests {
             ButtonAction::Media(0x00e9),
             ButtonAction::Special(Special::ProfileCycle),
             ButtonAction::Disabled,
+            ButtonAction::Macro { sector: 6, offset: 0 },
         ];
         for a in actions {
             let (kind, value, modifiers) = to_bus(a);
@@ -80,7 +89,9 @@ mod tests {
             ("disabled", 1, 0),
             ("mouse", 4, 1),
             ("other", 0, 0),
-            ("macro", 1, 0),
+            ("macro", 0, 0),
+            ("macro", 0x100, 0),
+            ("macro", 6, 1),
         ] {
             assert!(from_bus(kind, value, modifiers).is_err(), "{kind} {value} {modifiers}");
         }

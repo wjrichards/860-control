@@ -1,5 +1,6 @@
-//! The mouse's profile backup, saved once before the first profile write,
-//! and restoring it (`g512d --restore-mouse-profiles FILE`).
+//! The mouse's backups, each saved once: the directory and profile sectors
+//! before the first profile write, and the macro sectors before the first
+//! macro write. Restoring either: `g512d --restore-mouse-profiles FILE`.
 //!
 //! The file uses spike 6's format, so that backup restores too:
 //!
@@ -12,14 +13,16 @@ use std::{fmt::Write as _, fs, io, path::Path};
 
 use g512_hidpp::{
     Device, Result as HidppResult, Transport,
-    profiles::{self, ProfileSector, ProfilesInfo},
+    macros::SectorContent,
+    profiles::{self, MacroSector, ProfileSector, ProfilesInfo},
 };
 
 /// Sector number and bytes, in file order.
 pub type Sectors = Vec<(u16, Vec<u8>)>;
 
-pub fn format(sectors: &[(u16, Vec<u8>)]) -> String {
-    let mut out = String::from("# G502 HERO onboard profile backup, written by g512d before its first profile write.\n");
+/// `what` names the write the backup was made before: `profile` or `macro`.
+pub fn format(what: &str, sectors: &[(u16, Vec<u8>)]) -> String {
+    let mut out = format!("# G502 HERO onboard memory backup, written by g512d before its first {what} write.\n");
     for (sector, data) in sectors {
         let state = if ProfileSector::parse(data.clone()).is_ok() { "crc ok" } else { "crc not valid" };
         let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
@@ -47,14 +50,30 @@ pub fn parse(text: &str) -> Sectors {
     sectors
 }
 
-/// Write the backup to `path` unless a file is already there. Returns
-/// whether it was written.
+/// Write the directory and profile sectors to `path` unless a file is
+/// already there. Returns whether it was written.
 pub fn save_once<T: Transport>(dev: &mut Device<T>, info: &ProfilesInfo, path: &Path) -> io::Result<bool> {
+    save_sectors_once(dev, info, path, "profile", (0..=u16::from(info.profile_count)).collect())
+}
+
+/// Write the macro sectors (6 to `0x0f`) to `path` unless a file is
+/// already there. Returns whether it was written.
+pub fn save_macros_once<T: Transport>(dev: &mut Device<T>, info: &ProfilesInfo, path: &Path) -> io::Result<bool> {
+    save_sectors_once(dev, info, path, "macro", info.macro_sectors().map(MacroSector::number).collect())
+}
+
+fn save_sectors_once<T: Transport>(
+    dev: &mut Device<T>,
+    info: &ProfilesInfo,
+    path: &Path,
+    what: &str,
+    numbers: Vec<u16>,
+) -> io::Result<bool> {
     if path.exists() {
         return Ok(false);
     }
     let mut sectors = Vec::new();
-    for sector in 0..=u16::from(info.profile_count) {
+    for sector in numbers {
         let data = profiles::read_raw(dev, info, sector).map_err(|e| io::Error::other(e.to_string()))?;
         sectors.push((sector, data));
     }
@@ -62,7 +81,7 @@ pub fn save_once<T: Transport>(dev: &mut Device<T>, info: &ProfilesInfo, path: &
         fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, format(&sectors))?;
+    fs::write(&tmp, format(what, &sectors))?;
     fs::rename(&tmp, path)?;
     Ok(true)
 }
@@ -71,28 +90,50 @@ pub fn save_once<T: Transport>(dev: &mut Device<T>, info: &ProfilesInfo, path: &
 pub enum Restored {
     Written,
     Unchanged,
-    /// Not a user profile sector, or its CRC isn't valid: left alone.
+    /// A macro sector that was free in the backup (zeros as shipped, or no
+    /// valid CRC) is freed again: `ff` with a valid CRC, since the mouse
+    /// refuses to take zeros back (spike 10).
+    Cleared,
+    /// Not a user profile or macro sector, or a profile whose CRC isn't
+    /// valid: left alone.
     Skipped(&'static str),
 }
 
-/// Write each user profile sector from `sectors` whose CRC is valid and
-/// which differs from the mouse, verifying each by reading it back.
+/// Write each user profile and macro sector from `sectors` that differs
+/// from the mouse, verifying each by reading it back. Profile sectors need a
+/// valid CRC; a free macro sector is freed.
 pub fn restore<T: Transport>(dev: &mut Device<T>, sectors: &[(u16, Vec<u8>)]) -> HidppResult<Vec<(u16, Restored)>> {
     let info = profiles::read_info(dev)?;
     let mut done = Vec::new();
     for (number, data) in sectors {
-        let user = u8::try_from(*number).ok().and_then(|n| info.user_sector(n).ok());
-        let outcome = match (user, ProfileSector::parse(data.clone())) {
-            (None, _) => Restored::Skipped("not a user profile sector"),
-            (Some(_), Err(_)) => Restored::Skipped("CRC not valid"),
-            (Some(sector), Ok(wanted)) => {
-                if profiles::read_raw(dev, &info, *number)? == wanted.bytes() {
-                    Restored::Unchanged
-                } else {
+        let as_u8 = u8::try_from(*number).ok();
+        let user = as_u8.and_then(|n| info.user_sector(n).ok());
+        let macro_sector = as_u8.and_then(|n| info.macro_sector(n).ok());
+        let outcome = match (user, macro_sector) {
+            (Some(sector), _) => match ProfileSector::parse(data.clone()) {
+                Err(_) => Restored::Skipped("CRC not valid"),
+                Ok(wanted) if profiles::read_raw(dev, &info, *number)? == wanted.bytes() => Restored::Unchanged,
+                Ok(wanted) => {
                     profiles::write_sector(dev, &info, sector, &wanted)?;
                     Restored::Written
                 }
+            },
+            (None, Some(sector)) => {
+                let now = profiles::read_raw(dev, &info, *number)?;
+                match SectorContent::of(data) {
+                    SectorContent::Free if SectorContent::of(&now) == SectorContent::Free => Restored::Unchanged,
+                    SectorContent::Free => {
+                        profiles::write_macro_sector(dev, &info, sector, &SectorContent::free_sector(data.len()))?;
+                        Restored::Cleared
+                    }
+                    _ if now == *data => Restored::Unchanged,
+                    _ => {
+                        profiles::write_macro_sector(dev, &info, sector, data)?;
+                        Restored::Written
+                    }
+                }
             }
+            (None, None) => Restored::Skipped("not a user profile or macro sector"),
         };
         done.push((*number, outcome));
     }
@@ -145,6 +186,43 @@ mod tests {
     }
 
     #[test]
+    fn macro_backup_holds_sectors_6_to_f() {
+        let dir = std::env::temp_dir().join(format!("g512d-macro-backup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("mouse-macros-backup.txt");
+        let mut dev = mouse();
+        let info = profiles::read_info(&mut dev).unwrap();
+        assert!(save_macros_once(&mut dev, &info, &path).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# G502 HERO onboard memory backup, written by g512d before its first macro write."));
+        let numbers: Vec<u16> = parse(&text).iter().map(|(n, _)| *n).collect();
+        assert_eq!(numbers, (6..16).collect::<Vec<_>>());
+        assert!(text.contains("sector 0x0006: crc not valid"), "free sectors are zeros, as shipped");
+        assert!(!save_macros_once(&mut dev, &info, &path).unwrap(), "never overwritten");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn restore_puts_macro_sectors_back() {
+        use g512_hidpp::macros::{Macro, PlayMode, Step};
+        let mut dev = mouse();
+        let info = profiles::read_info(&mut dev).unwrap();
+        let shipped: Sectors = (6..16).map(|n| (n, profiles::read_raw(&mut dev, &info, n).unwrap())).collect();
+        let tap = Macro { mode: PlayMode::Once, steps: vec![Step::Pause(5), Step::WaitForRelease] };
+        let tap = tap.sector(256).unwrap();
+        profiles::write_macro_sector(&mut dev, &info, info.macro_sector(6).unwrap(), &tap).unwrap();
+        // The shipped backup frees sector 6 again and leaves the rest.
+        let done = restore(&mut dev, &shipped).unwrap();
+        assert_eq!(done[0], (6, Restored::Cleared));
+        assert!(done[1..].iter().all(|(_, r)| *r == Restored::Unchanged), "{done:?}");
+        assert_eq!(SectorContent::of(&profiles::read_raw(&mut dev, &info, 6).unwrap()), SectorContent::Free);
+        // A backup holding a macro writes it back.
+        let done = restore(&mut dev, &[(9, tap.clone())]).unwrap();
+        assert_eq!(done, [(9, Restored::Written)]);
+        assert_eq!(profiles::read_raw(&mut dev, &info, 9).unwrap(), tap);
+    }
+
+    #[test]
     fn restore_writes_only_valid_user_sectors() {
         let mut dev = mouse();
         let info = profiles::read_info(&mut dev).unwrap();
@@ -163,13 +241,13 @@ mod tests {
         assert_eq!(
             done,
             [
-                (0, Restored::Skipped("not a user profile sector")),
+                (0, Restored::Skipped("not a user profile or macro sector")),
                 (1, Restored::Unchanged),
                 (2, Restored::Written),
                 (3, Restored::Skipped("CRC not valid")),
                 (4, Restored::Unchanged),
                 (5, Restored::Written),
-                (0x101, Restored::Skipped("not a user profile sector")),
+                (0x101, Restored::Skipped("not a user profile or macro sector")),
             ]
         );
         assert_eq!(dev.transport_mut().profile_writes[writes_before..], [2, 5]);

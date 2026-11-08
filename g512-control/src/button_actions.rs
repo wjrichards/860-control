@@ -2,9 +2,26 @@
 //! "Middle click"), and the keys a shortcut can use: GDK keyvals to HID
 //! usages.
 
-use gtk::gdk::{self, Key};
+use std::cell::RefCell;
 
-use crate::service::ButtonAction;
+use gtk::{
+    gdk::{self, Key},
+    prelude::*,
+};
+
+use crate::service::{ButtonAction, MouseMacro};
+
+thread_local! {
+    /// The mouse's macros by sector, with their names, for describing the
+    /// buttons that play them. Set from each service snapshot.
+    static MACRO_NAMES: RefCell<Vec<(u8, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Remember the macros' names for [`describe`]; called on every refresh.
+pub fn set_macro_names(macros: &[MouseMacro]) {
+    let names = macros.iter().map(|m| (m.sector, m.name.clone())).collect();
+    MACRO_NAMES.with(|n| *n.borrow_mut() = names);
+}
 
 /// The G502 HERO's buttons in the mouse's order (spike 8).
 const BUTTON_NAMES: [&str; 11] = [
@@ -135,6 +152,14 @@ pub fn usage(key: Key) -> Option<u8> {
     KEYS.iter().chain(&ARROWS).find(|(k, ..)| *k == key).map(|&(_, usage, _)| usage)
 }
 
+/// The key itself, without Shift: Shift+1 is 1, not !.
+pub fn unshifted(ctrl: &gtk::EventControllerKey, keyval: Key, keycode: u32) -> Key {
+    ctrl.current_event()
+        .and_then(|e| e.downcast::<gdk::KeyEvent>().ok())
+        .and_then(|e| e.display()?.translate_key(keycode, gdk::ModifierType::empty(), e.layout() as i32))
+        .map_or(keyval, |(k, ..)| k)
+}
+
 /// HID modifier bits for the modifiers held.
 pub fn modifier_bits(state: gdk::ModifierType) -> u8 {
     MODIFIERS.iter().filter(|(.., m)| state.contains(*m)).fold(0, |bits, (bit, ..)| bits | bit)
@@ -190,6 +215,13 @@ pub fn describe(action: &ButtonAction) -> String {
         "media" => named(&MEDIA_KEYS, v).unwrap_or_else(|| format!("Media key {v:#06x}")),
         "special" => named(&SPECIALS, v).unwrap_or_else(|| format!("Mouse function {v:#04x}")),
         "disabled" => "Disabled".into(),
+        "macro" => {
+            let name = MACRO_NAMES.with(|n| n.borrow().iter().find(|(s, _)| u16::from(*s) == v).map(|(_, n)| n.clone()));
+            match name.filter(|n| !n.is_empty()) {
+                Some(name) => format!("Macro: {name}"),
+                None => format!("Macro: Macro in slot {v}"),
+            }
+        }
         _ => "Set elsewhere (kept as it is)".into(),
     }
 }
@@ -217,6 +249,12 @@ mod tests {
         assert_eq!(describe(&action("media", 0x00e9, 0)), "Volume up");
         assert_eq!(describe(&action("disabled", 0, 0)), "Disabled");
         assert_eq!(describe(&action("other", 0, 0)), "Set elsewhere (kept as it is)");
+        let copy_line = MouseMacro { sector: 6, name: "Copy line".into(), mode: "once".into(), steps: vec![] };
+        let unnamed = MouseMacro { sector: 9, name: String::new(), mode: "once".into(), steps: vec![] };
+        set_macro_names(&[copy_line, unnamed]);
+        assert_eq!(describe(&action("macro", 6, 0)), "Macro: Copy line");
+        assert_eq!(describe(&action("macro", 9, 0)), "Macro: Macro in slot 9");
+        assert_eq!(describe(&action("macro", 12, 0)), "Macro: Macro in slot 12", "not reported yet");
     }
 
     #[test]

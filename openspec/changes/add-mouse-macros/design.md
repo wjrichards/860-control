@@ -14,7 +14,7 @@ See `proposal.md` for why.
 - 16 sectors of 256 bytes;
 - 5 profiles;
 - macro format 1;
-- sectors 6–f empty.
+- sectors 6–f free: zero-filled with an invalid CRC, as task 1.1 confirmed (`evidence/hardware.md`). A free sector is one whose CRC is wrong or that is all `ff`, not only all `ff`.
 
 The macro format and the button entry come from libratbag's HID++ 2.0 driver (MIT; read for the format, no code copied). No open project writes full macros, so the hardware spike in tasks 1.x confirms them before anything else is built on them.
 
@@ -51,7 +51,7 @@ A newtype that can only be made for sectors above the profile count and below th
 - **Step count and slot use:** "N steps" counts editor rows. "Uses P% of its slot" is the encoded size over 254.
 
 ### Names in g512d's state file
-The mouse has nowhere to put a name. `store.rs` keeps `macro_names: {sector → (sha256 of the sector's macro bytes, name)}`. A name whose hash no longer matches is dropped, so a macro changed on another computer shows as "Macro in slot N" instead of a wrong name.
+The mouse has nowhere to put a name. `store.rs` keeps `macro_names: {sector → (64-bit FNV-1a fingerprint of the macro's encoded bytes, name)}` as a `[macros.N]` table in the state file (no new dependency; a fingerprint, not a security hash). A name whose hash no longer matches is dropped, so a macro changed on another computer shows as "Macro in slot N" instead of a wrong name.
 - **Alternative:** store the name inside the sector after `ff`. Rejected, because other software may treat those bytes as free.
 
 ### Save and delete order
@@ -90,6 +90,12 @@ The mouse has nowhere to put a name. `store.rs` keeps `macro_names: {sector → 
 ### Play modes after the spike
 The editor's Plays drop-down shows only modes the write test confirmed. The spec names all of them but gates each on confirmation, the same pattern media keys followed in change 6.
 
+**Spike result (2026-10-29, `evidence/hardware.md`):** all four modes and pauses work on the user's mouse.
+- **The editor's Plays drop-down offers the three approved modes:** Once, Repeats while held (`02`) and Repeats until pressed again (`03`).
+- **`01`, wait for release, also works,** but it isn't a whole-macro mode: it splits the steps into press and release parts. It stays out of this change's editor and can come later as a step type ("Wait for release").
+- **The mouse refuses to finish a write whose CRC is wrong** (HID++ `0x04` on `memoryWriteEnd`), and the sector may still change. That confirms clearing with `ff` and a valid CRC, and reading back after every failed write, not only after successful ones.
+- **Writing the active profile takes effect immediately,** so g512d doesn't need to switch profiles after pointing a button at a macro.
+
 ## Risks / Trade-offs
 
 - [The mouse rejects or mis-plays a macro written this way] → Spike first (tasks 1.x), with a spare profile and sector 6 only, restored from the backup afterwards. If it fails, stop and rethink before any other task.
@@ -104,3 +110,13 @@ The editor's Plays drop-down shows only modes the write test confirmed. The spec
 - An older app with a newer service: it shows a macro button as "Set elsewhere (kept as it is)", today's text for unknown kinds, and never writes it.
 - A newer app with an older service: no `MouseMacros` property, so no Macros row and no Macro choice.
 - **Rollback:** `g512d --restore-mouse-profiles mouse-macros-backup.txt` puts sectors 6–f back. Then restore the profile backup to clear any button entries that point at macros.
+
+## Implementation notes (task group 4)
+
+- **Macros icon:** Adwaita's nearest icon (`media-playlist-consecutive-symbolic`) is two arrows, which says nothing about macros in the empty state, so the board's list-and-play icon ships as `g512-macros-symbolic`. It's compiled into the binary as a GResource (`g512-control/build.rs`, `data/resources.gresource.xml`), so development builds and the Flatpak both find it, and it's still recoloured as a symbolic icon.
+- **"Macro: <name>" on callouts:** `button_actions::describe` reads the macro names from a small registry (`set_macro_names`) that each refresh updates, instead of every caller passing the macro list.
+- **Recording:** modifiers fold into the key they're held with (Shift+End is one step); a modifier pressed and released alone isn't recorded, because the key table has no usage for it. Keys still down at Stop are let go, so a macro never leaves a key held.
+- **Step rows** are rebuilt from the model on each change. They reached the accessibility tree with their names when the dialog opened ("Move step" ×5 rows, "Delete step" ×5, "Pause in milliseconds" ×2); rows rebuilt after an edit are checked in the hands-on test (5.3).
+- **Add Step** uses submenus for Mouse Button and Media Key instead of the board's "…" items, which would have meant two more small dialogs.
+- **Screenshots** (`evidence/app/`) come from new debug hooks: `G512_CONTROL_MACRO` (`new` or a sector), `G512_CONTROL_MACRO_STATE` and `G512_CONTROL_BUTTON`.
+

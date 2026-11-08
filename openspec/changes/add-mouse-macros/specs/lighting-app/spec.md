@@ -141,7 +141,7 @@ The app SHALL edit a macro in a dialog, opened from a Macros page row, from New 
   - a key or button held around other steps: a "Hold down" row and a "Let go" row, each with its keycap;
   - a pause: "Pause" with "Wait before the next step", and its length in a spin button (milliseconds);
   - each row SHALL have a drag handle and a delete button, and a step's keycap SHALL open the shortcut capture to change it;
-- an **Add Step** row at the end, opening a menu: "Key…", "Mouse Button…", "Media Key…", "Pause" (50 ms).
+- an **Add Step** row at the end, opening a menu: "Key…" (then press the key), "Mouse Button" and "Media Key" (each a submenu of the choices), and "Pause" (50 ms).
 
 **Recording:**
 - Record SHALL become a red **Stop** with the elapsed time ("Stop · 0:04").

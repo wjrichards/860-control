@@ -1,6 +1,6 @@
 //! The saved settings, `$XDG_CONFIG_HOME/g512-control/state.toml`: the
 //! lighting state, both key maps, the game switch, whether the lights are
-//! on, and the mouse's settings.
+//! on, the mouse's settings, and the names of the macros on the mouse.
 
 use std::{
     collections::BTreeMap,
@@ -34,6 +34,15 @@ pub struct Settings {
     /// Off shows Off on the keyboard without touching anything else.
     pub lights_on: bool,
     pub mouse: MouseSettings,
+    /// Macro names by sector; the mouse can't store them.
+    pub macro_names: BTreeMap<u8, MacroName>,
+}
+
+/// A macro's name, with the fingerprint of the bytes it was given to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacroName {
+    pub fingerprint: u64,
+    pub name: String,
 }
 
 impl Default for Settings {
@@ -45,6 +54,7 @@ impl Default for Settings {
             game_switch: false,
             lights_on: true,
             mouse: MouseSettings::default(),
+            macro_names: BTreeMap::new(),
         }
     }
 }
@@ -81,6 +91,15 @@ struct File {
     /// Written only once the mouse settings differ from the defaults.
     #[serde(skip_serializing_if = "Option::is_none")]
     mouse: Option<MouseFile>,
+    /// By sector number; entries that don't parse are dropped.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    macros: BTreeMap<String, MacroFile>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MacroFile {
+    fingerprint: String,
+    name: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -194,6 +213,11 @@ fn encode(settings: &Settings) -> String {
                 brightness: own.map(|s| s.brightness),
             }
         }),
+        macros: settings
+            .macro_names
+            .iter()
+            .map(|(sector, m)| (sector.to_string(), MacroFile { fingerprint: format!("{:016x}", m.fingerprint), name: m.name.clone() }))
+            .collect(),
     };
     toml::to_string(&file).expect("settings always serialise")
 }
@@ -236,6 +260,14 @@ fn decode(text: &str) -> Result<Settings, String> {
         game_switch: file.game_switch,
         lights_on: file.lights_on,
         mouse,
+        macro_names: file
+            .macros
+            .iter()
+            .filter_map(|(sector, m)| {
+                let fingerprint = u64::from_str_radix(&m.fingerprint, 16).ok()?;
+                Some((sector.parse().ok()?, MacroName { fingerprint, name: m.name.clone() }))
+            })
+            .collect(),
     })
 }
 
@@ -268,6 +300,7 @@ mod tests {
             game_switch: true,
             lights_on: false,
             mouse: MouseSettings::default(),
+            macro_names: BTreeMap::new(),
         };
         store.save(&settings).unwrap();
         assert_eq!(store.load(), settings);
@@ -283,6 +316,24 @@ mod tests {
         store.save(&edited).unwrap();
         assert_eq!(store.load(), edited);
         assert!(fs::read_to_string(store.path()).unwrap().contains("[gaming]"));
+        assert!(!fs::read_to_string(store.path()).unwrap().contains("[macros"), "no names, no table");
+        fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn macro_names_round_trip() {
+        let store = temp_store("macro-names");
+        let mut settings = Settings::default();
+        settings.macro_names.insert(6, MacroName { fingerprint: 0x0123_4567_89ab_cdef, name: "Copy line".into() });
+        settings.macro_names.insert(15, MacroName { fingerprint: 1, name: "Reload \"fast\"".into() });
+        store.save(&settings).unwrap();
+        assert_eq!(store.load(), settings);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[macros.6]") && text.contains("fingerprint = \"0123456789abcdef\""), "{text}");
+        // An entry that doesn't parse is dropped, not the whole file.
+        fs::write(store.path(), text.replace("0123456789abcdef", "not hex")).unwrap();
+        let loaded = store.load();
+        assert_eq!(loaded.macro_names.keys().copied().collect::<Vec<_>>(), [15]);
         fs::remove_dir_all(store.path().parent().unwrap().parent().unwrap()).unwrap();
     }
 

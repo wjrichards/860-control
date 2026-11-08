@@ -18,10 +18,13 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::{
     art,
-    button_actions::describe,
+    button_actions::{describe, set_macro_names},
     button_section::ButtonSection,
     editor::{Editor, MapName},
     keyboard_art::KeyboardArt,
+    macro_editor::{MacroDraft, MacroEditor},
+    macro_steps,
+    macros_page::MacrosPage,
     mouse_art::{Badges, HOTSPOTS, MouseArt, Width},
     mouse_section::MouseSection,
     profile_section::ProfileSection,
@@ -34,6 +37,10 @@ use crate::{
 };
 
 pub(crate) const UPDATE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// What to do with a new macro's sector once it's saved (a Change dialog
+/// choosing it).
+type AfterSave = Option<Box<dyn Fn(u8)>>;
 
 /// The drawings sit on cards that follow the style; the keyboard drawing is
 /// a flat button, and focus and hover give it the accent ring.
@@ -68,11 +75,19 @@ enum PageId {
     MsLighting,
     MsDpi,
     MsButtons,
+    MsMacros,
 }
 
 impl PageId {
-    const ALL: [PageId; 6] =
-        [PageId::KbLighting, PageId::KbKeyMaps, PageId::KbGames, PageId::MsLighting, PageId::MsDpi, PageId::MsButtons];
+    const ALL: [PageId; 7] = [
+        PageId::KbLighting,
+        PageId::KbKeyMaps,
+        PageId::KbGames,
+        PageId::MsLighting,
+        PageId::MsDpi,
+        PageId::MsButtons,
+        PageId::MsMacros,
+    ];
 
     fn device(self) -> Device {
         match self {
@@ -89,6 +104,7 @@ impl PageId {
             PageId::MsLighting => "mouse-lighting",
             PageId::MsDpi => "dpi",
             PageId::MsButtons => "buttons",
+            PageId::MsMacros => "macros",
         }
     }
 
@@ -99,6 +115,7 @@ impl PageId {
             PageId::KbGames => "Games",
             PageId::MsDpi => "DPI & Profiles",
             PageId::MsButtons => "Buttons",
+            PageId::MsMacros => "Macros",
         }
     }
 
@@ -109,6 +126,7 @@ impl PageId {
             PageId::KbGames => "input-gaming-symbolic",
             PageId::MsDpi => "find-location-symbolic",
             PageId::MsButtons => "input-mouse-symbolic",
+            PageId::MsMacros => "g512-macros-symbolic",
         }
     }
 
@@ -373,6 +391,11 @@ pub struct Ui {
     mouse_section: Rc<MouseSection>,
     profile_section: Rc<ProfileSection>,
     button_section: Rc<ButtonSection>,
+    macros_page: Rc<MacrosPage>,
+    /// The macro editor while it is open, to tell it when the mouse comes and goes.
+    macro_editor: RefCell<Option<Rc<MacroEditor>>>,
+    /// The mouse as last reported, for the editor's "Used by".
+    last_mouse: RefCell<Option<Mouse>>,
     keyboard_art: Rc<KeyboardArt>,
     games_art: Rc<KeyboardArt>,
     list_keyboard_art: Rc<KeyboardArt>,
@@ -565,6 +588,8 @@ impl Ui {
         let mouse_buttons_art = MouseArt::new(Badges::All);
         page(PageId::MsButtons).column.append(&mouse_buttons_art.widget);
         button_section.set_dialog_parent(&page(PageId::MsButtons).page);
+        let macros_page = MacrosPage::new();
+        page(PageId::MsMacros).column.append(&macros_page.widget);
 
         // The sidebar.
         let rows: Vec<SidebarRow> = PageId::ALL.iter().map(|&id| SidebarRow::new(id)).collect();
@@ -584,7 +609,7 @@ impl Ui {
             "Mouse",
             "G502 HERO",
             list_mouse_art.widget.upcast_ref(),
-            &[row(PageId::MsLighting), row(PageId::MsDpi), row(PageId::MsButtons)],
+            &[row(PageId::MsLighting), row(PageId::MsDpi), row(PageId::MsButtons), row(PageId::MsMacros)],
         );
         let separator = gtk::Separator::builder().margin_top(6).margin_bottom(6).margin_start(12).margin_end(12).build();
         let sidebar_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_bottom(6).build();
@@ -696,6 +721,9 @@ impl Ui {
             mouse_section,
             profile_section,
             button_section,
+            macros_page,
+            macro_editor: RefCell::new(None),
+            last_mouse: RefCell::new(None),
             keyboard_art,
             games_art,
             list_keyboard_art,
@@ -723,6 +751,86 @@ impl Ui {
                 (full, Width::Full),
             ]),
         }
+    }
+
+    /// Open the macro editor over `parent`: a new macro, or the one in
+    /// `sector`. Saving and deleting go to the service; a problem it names
+    /// becomes the editor's banner. `then` gets the sector once saved.
+    fn open_macro_editor(self: &Rc<Self>, sector: Option<u8>, parent: &gtk::Widget, then: AfterSave) {
+        let mouse = self.last_mouse.borrow().clone();
+        let existing =
+            sector.and_then(|s| mouse.as_ref()?.macros.as_ref()?.iter().find(|m| m.sector == s).cloned());
+        let users = match (&mouse, sector) {
+            (Some(m), Some(s)) => macro_steps::users(m, s),
+            _ => Vec::new(),
+        };
+        let draft = match &existing {
+            Some(m) => MacroDraft {
+                sector: Some(m.sector),
+                name: m.name.clone(),
+                mode: m.mode.clone(),
+                steps: m.steps.clone(),
+                used_by: Some(macro_steps::used_by(&users)),
+                users: users.len(),
+            },
+            None => MacroDraft {
+                sector: None,
+                name: String::new(),
+                mode: "once".into(),
+                steps: Vec::new(),
+                used_by: None,
+                users: 0,
+            },
+        };
+        let editor = MacroEditor::new(draft);
+        editor.set_connected(mouse.as_ref().is_some_and(|m| m.state == "connected"));
+        let then = Rc::new(then);
+        let (weak_ui, weak_editor) = (Rc::downgrade(self), Rc::downgrade(&editor));
+        editor.connect_save(move |(sector, name, mode, steps)| {
+            let (Some(ui), Some(editor)) = (weak_ui.upgrade(), weak_editor.upgrade()) else { return };
+            let Some(bus) = ui.bus.borrow().clone() else { return };
+            let then = then.clone();
+            glib::spawn_future_local(async move {
+                let steps: Vec<(String, u16, u8)> = steps.into_iter().map(|s| s.to_bus()).collect();
+                match bus.lighting.save_mouse_macro(sector.unwrap_or(0), &name, &mode, &steps).await {
+                    Ok(saved) => {
+                        editor.dialog.close();
+                        ui.toasts.add_toast(adw::Toast::new("Saved to the mouse"));
+                        ui.refresh().await;
+                        if let Some(f) = then.as_ref() {
+                            f(saved);
+                        }
+                    }
+                    Err(e) => match service::macro_problem(&e) {
+                        Some(problem) => editor.show_problem(problem),
+                        None => ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e))),
+                    },
+                }
+            });
+        });
+        let (weak_ui, weak_editor) = (Rc::downgrade(self), Rc::downgrade(&editor));
+        editor.connect_delete(move |sector| {
+            let (Some(ui), Some(editor)) = (weak_ui.upgrade(), weak_editor.upgrade()) else { return };
+            let Some(bus) = ui.bus.borrow().clone() else { return };
+            glib::spawn_future_local(async move {
+                match bus.lighting.delete_mouse_macro(sector).await {
+                    Ok(()) => {
+                        editor.dialog.close();
+                        ui.toasts.add_toast(adw::Toast::new("Macro deleted"));
+                    }
+                    Err(e) => ui.toasts.add_toast(adw::Toast::new(&service::error_message(&e))),
+                }
+                ui.refresh().await;
+            });
+        });
+        let weak_ui = Rc::downgrade(self);
+        editor.dialog.connect_closed(move |_| {
+            if let Some(ui) = weak_ui.upgrade() {
+                ui.macro_editor.borrow_mut().take();
+            }
+        });
+        editor.dialog.present(Some(parent));
+        *self.macro_editor.borrow_mut() = Some(editor);
     }
 
     fn page(&self, id: PageId) -> &ContentPage {
@@ -811,6 +919,7 @@ impl Ui {
         self.mouse_dpi_art.set_caption(&dpi_caption(&self.dpi_actions.borrow(), narrow));
         self.mouse_buttons_art.arrange(width);
         self.editor.set_compact(width == Width::Narrow);
+        self.macros_page.set_narrow(narrow);
         self.editor.set_key_floor(if narrow { 1.0 } else { KEY_FLOOR });
         self.games_art.set_hint(if narrow { GAMES_HINT_NARROW } else { GAMES_HINT });
         let margin = if matches!(width, Width::Narrow | Width::Compact) { 12 } else { 32 };
@@ -996,6 +1105,19 @@ impl Ui {
                 ui.button_section.open_dialog(index);
             }
         });
+        let on_macro = weak.clone();
+        self.macros_page.connect_open(move |sector| {
+            if let Some(ui) = on_macro.upgrade() {
+                let parent = ui.page(PageId::MsMacros).page.clone();
+                ui.open_macro_editor(sector, parent.upcast_ref(), None);
+            }
+        });
+        let on_new_macro = weak.clone();
+        self.button_section.connect_new_macro(move |parent, then| {
+            if let Some(ui) = on_new_macro.upgrade() {
+                ui.open_macro_editor(None, &parent, Some(then));
+            }
+        });
         let (on_match, on_lighting, on_idle) = (weak.clone(), weak.clone(), weak.clone());
         self.mouse_section.connect(
             move |on| {
@@ -1146,8 +1268,10 @@ impl Ui {
     /// window first, and `G512_CONTROL_STYLE=light` forces the light style.
     /// `G512_CONTROL_FRAMES=N` saves N frames at about 30 a second instead, to
     /// a path with `%04d` in it. `G512_CONTROL_SIDEBAR=1` slides the folded
-    /// sidebar in (Key Maps).
-    fn debug_screenshot(&self) {
+    /// sidebar in (Key Maps). `G512_CONTROL_BUTTON=N` opens button N's Change
+    /// dialog; `G512_CONTROL_MACRO=new` or a sector opens the macro editor, in
+    /// the state `G512_CONTROL_MACRO_STATE` names (see `MacroEditor::debug_state`).
+    fn debug_screenshot(self: &Rc<Self>) {
         let Ok(path) = std::env::var("G512_CONTROL_SCREENSHOT") else { return };
         if std::env::var("G512_CONTROL_STYLE").is_ok_and(|s| s == "light") {
             adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceLight);
@@ -1168,6 +1292,17 @@ impl Ui {
         if std::env::var_os("G512_CONTROL_SIDEBAR").is_some() {
             let fold = self.fold.clone();
             glib::timeout_add_local_once(Duration::from_millis(500), move || fold.set_show_sidebar(true));
+        }
+        if let Some(index) = std::env::var("G512_CONTROL_BUTTON").ok().and_then(|n| n.parse().ok()) {
+            self.button_section.open_dialog(index);
+        }
+        if let Ok(which) = std::env::var("G512_CONTROL_MACRO") {
+            let parent = self.page(PageId::MsMacros).page.clone();
+            self.open_macro_editor(which.parse().ok(), parent.upcast_ref(), None);
+            let state = std::env::var("G512_CONTROL_MACRO_STATE").unwrap_or_default();
+            if let Some(editor) = self.macro_editor.borrow().as_ref() {
+                editor.debug_state(&state);
+            }
         }
         let frames: u32 = std::env::var("G512_CONTROL_FRAMES").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
         let window = self.window.clone();
@@ -1209,7 +1344,16 @@ impl Ui {
             Ok(Snapshot { keyboard, mouse }) => {
                 self.mouse_section.show(mouse.as_deref());
                 self.profile_section.show(mouse.as_deref());
+                if let Some(macros) = mouse.as_deref().and_then(|m| m.macros.as_deref()) {
+                    set_macro_names(macros);
+                }
                 self.button_section.show(mouse.as_deref());
+                let has_macros = self.macros_page.show(mouse.as_deref());
+                self.row(PageId::MsMacros).row.set_visible(has_macros);
+                if let Some(editor) = self.macro_editor.borrow().as_ref() {
+                    editor.set_connected(mouse.as_deref().is_some_and(|m| m.state == "connected"));
+                }
+                *self.last_mouse.borrow_mut() = mouse.as_deref().cloned();
                 if let Some(m) = mouse.as_deref() {
                     self.show_mouse_art(&keyboard, m);
                 }

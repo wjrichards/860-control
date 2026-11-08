@@ -9,6 +9,7 @@ use crate::{
     buttons,
     controller::{Controller, HidrawOpener, SetError},
     keymap::{KeyMap, MapName},
+    macros,
     state::{Effect, InvalidState, LightingState, SPEED_MAX, SPEED_MIN, effect_from_name},
 };
 
@@ -49,6 +50,62 @@ fn set_error(e: SetError) -> fdo::Error {
         SetError::Device(e) => fdo::Error::Failed(format!("the device refused the change: {e}")),
         SetError::Profile(msg) => fdo::Error::InvalidArgs(msg),
         SetError::Backup(e) => fdo::Error::Failed(format!("could not save the profile backup, so nothing was written: {e}")),
+        SetError::MacroTooLong(msg) => fdo::Error::InvalidArgs(format!("the macro is too long: {msg}")),
+        SetError::MacroMemoryFull => fdo::Error::Failed("every macro sector on the mouse is in use".into()),
+        SetError::WriteFailed(msg) => fdo::Error::Failed(format!("the mouse didn't take the write: {msg}")),
+    }
+}
+
+/// Errors from the macro calls. The three macro problems have their own
+/// names (`io.github.g512control.Error.MacroTooLong`, `.MacroMemoryFull`,
+/// `.WriteFailed`), so a front end can tell them apart without reading the
+/// text; everything else is the usual `org.freedesktop.DBus.Error` one.
+#[derive(Debug)]
+pub enum MacroError {
+    Named(&'static str, String),
+    Fdo(fdo::Error),
+}
+
+impl From<SetError> for MacroError {
+    fn from(e: SetError) -> Self {
+        match e {
+            SetError::MacroTooLong(msg) => MacroError::Named("io.github.g512control.Error.MacroTooLong", msg),
+            SetError::MacroMemoryFull => MacroError::Named(
+                "io.github.g512control.Error.MacroMemoryFull",
+                "every macro sector on the mouse is in use".into(),
+            ),
+            SetError::WriteFailed(msg) => MacroError::Named("io.github.g512control.Error.WriteFailed", msg),
+            e => MacroError::Fdo(set_error(e)),
+        }
+    }
+}
+
+impl From<zbus::Error> for MacroError {
+    fn from(e: zbus::Error) -> Self {
+        MacroError::Fdo(e.into())
+    }
+}
+
+impl zbus::DBusError for MacroError {
+    fn create_reply(&self, call: &zbus::message::Header<'_>) -> zbus::Result<zbus::Message> {
+        match self {
+            MacroError::Fdo(e) => e.create_reply(call),
+            MacroError::Named(name, msg) => zbus::Message::error(call, *name)?.build(&(msg,)),
+        }
+    }
+
+    fn name(&self) -> zbus::names::ErrorName<'_> {
+        match self {
+            MacroError::Fdo(e) => e.name(),
+            MacroError::Named(name, _) => zbus::names::ErrorName::from_static_str_unchecked(name),
+        }
+    }
+
+    fn description(&self) -> Option<&str> {
+        match self {
+            MacroError::Fdo(e) => e.description(),
+            MacroError::Named(_, msg) => Some(msg),
+        }
     }
 }
 
@@ -82,7 +139,9 @@ impl Lighting {
         self.mouse_profiles_changed(emitter).await?;
         self.mouse_active_profile_changed(emitter).await?;
         self.mouse_dpi_range_changed(emitter).await?;
-        self.mouse_buttons_changed(emitter).await
+        self.mouse_buttons_changed(emitter).await?;
+        self.mouse_macros_changed(emitter).await?;
+        self.mouse_macro_sectors_changed(emitter).await
     }
 }
 
@@ -264,8 +323,9 @@ impl Lighting {
     /// buttons in the mouse's order, left click first. Kinds: `mouse` (value
     /// 1 left, 2 right, 4 middle, 8 back, 16 forward), `key` (HID usage, with
     /// modifier bits Ctrl 1, Shift 2, Alt 4, Super 8), `media` (consumer
-    /// usage), `special` (mouse function code), `disabled` and `other` (an
-    /// entry this service doesn't write). Empty when unknown.
+    /// usage), `special` (mouse function code), `macro` (the macro's sector,
+    /// see `MouseMacros`), `disabled` and `other` (an entry this service
+    /// doesn't write). Empty when unknown.
     #[zbus(property)]
     async fn mouse_buttons(&self) -> Vec<(u8, Vec<(String, u16, u8)>)> {
         let ctl = self.ctl();
@@ -285,9 +345,72 @@ impl Lighting {
             .collect()
     }
 
+    /// The macros stored on the mouse: (sector, name, play mode, steps).
+    /// The name is empty when this service doesn't know it. Play modes:
+    /// `once`, `held` (repeats while held) and `toggle` (repeats until pressed
+    /// again). Steps are (kind, value, modifiers): `key-down` and `key-up`
+    /// (HID usage, modifier bits as for buttons), `button-down` and
+    /// `button-up` (mouse-button mask), `media-down` and `media-up` (consumer
+    /// usage), `pause` (milliseconds) and `wait-release` (0). Empty when
+    /// unknown.
+    #[zbus(property)]
+    async fn mouse_macros(&self) -> Vec<(u8, String, String, Vec<(String, u16, u8)>)> {
+        let ctl = self.ctl();
+        ctl.mouse_macros()
+            .into_iter()
+            .map(|m| {
+                let steps = m
+                    .content
+                    .steps
+                    .into_iter()
+                    .map(|step| {
+                        let (kind, value, modifiers) = macros::step_to_bus(step);
+                        (kind.to_string(), value, modifiers)
+                    })
+                    .collect();
+                (m.sector, m.name, macros::mode_to_bus(m.content.mode).to_string(), steps)
+            })
+            .collect()
+    }
+
+    /// (used, total) macro sectors on the mouse, one macro each; (0, 0)
+    /// when unknown.
+    #[zbus(property)]
+    async fn mouse_macro_sectors(&self) -> (u8, u8) {
+        self.ctl().mouse_profiles().map_or((0, 0), |p| p.macro_sectors())
+    }
+
+    /// Save a macro on the mouse and return its sector: a new one when
+    /// `sector` is 0, otherwise a new version of the macro in `sector`. The
+    /// first macro write ever saves a backup of the macro sectors. Fails with
+    /// `io.github.g512control.Error.MacroTooLong`, `.MacroMemoryFull` or
+    /// `.WriteFailed` (the mouse is left as it was).
+    async fn save_mouse_macro(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        sector: u8,
+        name: String,
+        mode: String,
+        steps: Vec<(String, u16, u8)>,
+    ) -> Result<u8, MacroError> {
+        let result = self.ctl().save_mouse_macro(sector, &name, &mode, &steps);
+        let saved = result?;
+        self.emit_all(&emitter).await?;
+        Ok(saved)
+    }
+
+    /// Delete the macro in `sector`. Every button that plays it, in every
+    /// profile, is set to disabled first.
+    async fn delete_mouse_macro(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, sector: u8) -> Result<(), MacroError> {
+        let result = self.ctl().delete_mouse_macro(sector);
+        result?;
+        self.emit_all(&emitter).await?;
+        Ok(())
+    }
+
     /// Change one button of a profile (1-based) on the mouse. Button 0 (left
-    /// click) and the kind `other` are refused. The first write ever saves a
-    /// backup.
+    /// click), the kind `other`, and a `macro` whose sector holds none are
+    /// refused. The first write ever saves a backup.
     async fn set_mouse_button(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -369,5 +492,23 @@ pub fn notify(conn: &zbus::blocking::Connection) {
     });
     if let Err(e) = result {
         eprintln!("warning: cannot emit property changes: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zbus::DBusError;
+
+    use super::*;
+
+    #[test]
+    fn macro_errors_have_their_own_names() {
+        let name = |e: SetError| MacroError::from(e).name().to_string();
+        assert_eq!(name(SetError::MacroTooLong("x".into())), "io.github.g512control.Error.MacroTooLong");
+        assert_eq!(name(SetError::MacroMemoryFull), "io.github.g512control.Error.MacroMemoryFull");
+        assert_eq!(name(SetError::WriteFailed("x".into())), "io.github.g512control.Error.WriteFailed");
+        assert_eq!(name(SetError::Profile("x".into())), "org.freedesktop.DBus.Error.InvalidArgs");
+        let full = MacroError::from(SetError::MacroMemoryFull);
+        assert_eq!(full.description(), Some("every macro sector on the mouse is in use"));
     }
 }

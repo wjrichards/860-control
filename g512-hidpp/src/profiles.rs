@@ -3,9 +3,11 @@
 //! them back with a read-back check, and switching the active profile
 //! (spikes 7 and 8).
 //!
-//! Only user profile sectors can be written: [`UserSector`] can be made for
-//! sectors 1 to the profile count and nothing else, so the profile directory
-//! (sector 0) and the ROM sectors (`0x01xx`) are out of reach. The onboard
+//! Only user profile and macro sectors can be written: [`UserSector`] can be
+//! made for sectors 1 to the profile count, and [`MacroSector`] for the
+//! sectors above it up to the sector count (6 to `0x0f` on the G502 HERO,
+//! spike 10), and nothing else, so the profile directory (sector 0) and the
+//! ROM sectors (`0x01xx`) are out of reach. The onboard
 //! mode is never changed ([`Feature::allows`] refuses `setOnboardMode`).
 //! Left click (button entry 0) can't be changed, and entries this module
 //! doesn't understand are kept byte for byte.
@@ -23,6 +25,8 @@ const DPI_FN_GET_LIST: u8 = 1;
 
 /// The only profile layout this module understands.
 const PROFILE_FORMAT: u8 = 2;
+/// The only macro layout [`crate::macros`] understands.
+const MACRO_FORMAT: u8 = 1;
 const CHUNK: usize = 16;
 /// Profile format 2: report rate, default DPI index, switched DPI index,
 /// then five little-endian DPI values.
@@ -44,6 +48,7 @@ const DPI_STEP_MARKER: u16 = 0xe000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProfilesInfo {
     pub format: u8,
+    pub macro_format: u8,
     pub profile_count: u8,
     pub button_count: u8,
     pub sector_count: u8,
@@ -59,6 +64,20 @@ impl ProfilesInfo {
         }
         Ok(UserSector(u16::from(profile)))
     }
+
+    /// Macro sector `sector`: one above the user profiles and below the
+    /// sector count, while the mouse's macros are format 1.
+    pub fn macro_sector(&self, sector: u8) -> Result<MacroSector> {
+        if self.macro_format != MACRO_FORMAT || sector <= self.profile_count || sector >= self.sector_count {
+            return Err(Error::InvalidProfile(format!("no macro sector {sector}")));
+        }
+        Ok(MacroSector(u16::from(sector)))
+    }
+
+    /// Every macro sector, in order; none when the macros aren't format 1.
+    pub fn macro_sectors(&self) -> impl Iterator<Item = MacroSector> + '_ {
+        (self.profile_count.saturating_add(1)..self.sector_count).filter_map(|n| self.macro_sector(n).ok())
+    }
 }
 
 /// A user profile sector, 1 to the profile count.
@@ -66,6 +85,16 @@ impl ProfilesInfo {
 pub struct UserSector(u16);
 
 impl UserSector {
+    pub fn number(self) -> u16 {
+        self.0
+    }
+}
+
+/// A macro sector, above the user profiles and below the sector count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MacroSector(u16);
+
+impl MacroSector {
     pub fn number(self) -> u16 {
         self.0
     }
@@ -127,9 +156,11 @@ pub enum ButtonAction {
     Media(u16),
     /// `90 cc 00 00`: a mouse function.
     Special(Special),
+    /// `00 ss 00 oo`: the macro starting at byte `oo` of sector `ss`.
+    Macro { sector: u8, offset: u8 },
     /// `80 01 00 00`: no mouse buttons, so the button does nothing.
     Disabled,
-    /// Anything else (macros, unknown types): shown, never written.
+    /// Anything else (unknown types): shown, never written.
     Other([u8; 4]),
 }
 
@@ -141,11 +172,13 @@ impl ButtonAction {
             [0x80, 0x02, modifiers, usage] => ButtonAction::Key { modifiers, usage },
             [0x80, 0x03, hi, lo] => ButtonAction::Media(u16::from_be_bytes([hi, lo])),
             [0x90, code, _, _] => Special::from_code(code).map_or(ButtonAction::Other(entry), ButtonAction::Special),
+            [0x00, sector, 0x00, offset] if sector != 0 => ButtonAction::Macro { sector, offset },
             _ => ButtonAction::Other(entry),
         }
     }
 
-    /// The entry for this action; `Other` and an empty mouse mask have none.
+    /// The entry for this action; `Other`, an empty mouse mask and a macro
+    /// that doesn't start a sector have none.
     pub fn encode(self) -> Result<[u8; 4]> {
         Ok(match self {
             ButtonAction::Mouse(0) => return Err(Error::InvalidProfile("an empty mouse-button mask".into())),
@@ -159,6 +192,8 @@ impl ButtonAction {
                 [0x80, 0x03, hi, lo]
             }
             ButtonAction::Special(s) => [0x90, s as u8, 0, 0],
+            ButtonAction::Macro { sector: sector @ 1.., offset: 0 } => [0x00, sector, 0x00, 0x00],
+            ButtonAction::Macro { .. } => return Err(Error::InvalidProfile("a macro that doesn't start a sector".into())),
             ButtonAction::Disabled => [0x80, 0x01, 0, 0],
             ButtonAction::Other(_) => return Err(Error::InvalidProfile("an entry this program can't write".into())),
         })
@@ -215,13 +250,17 @@ impl ProfileSector {
     }
 
     /// This profile with button `index` set to `action`. Every other byte is
-    /// kept and the CRC is recomputed. Left click (entry 0) is refused.
-    pub fn with_button(&self, index: u8, action: ButtonAction) -> Result<ProfileSector> {
+    /// kept and the CRC is recomputed. Left click (entry 0) is refused, and so
+    /// is a macro outside the macro sectors.
+    pub fn with_button(&self, info: &ProfilesInfo, index: u8, action: ButtonAction) -> Result<ProfileSector> {
         if index == 0 {
             return Err(Error::InvalidProfile("left click can't be changed".into()));
         }
         if index >= MAX_BUTTONS {
             return Err(Error::InvalidProfile(format!("no button {index}")));
+        }
+        if let ButtonAction::Macro { sector, .. } = action {
+            info.macro_sector(sector)?;
         }
         let entry = action.encode()?;
         let at = BUTTONS + BUTTON_SIZE * usize::from(index);
@@ -281,6 +320,7 @@ pub fn read_info<T: Transport>(dev: &mut Device<T>) -> Result<ProfilesInfo> {
     let r = dev.request(Feature::OnboardProfiles, FN_GET_INFO, &[])?;
     let info = ProfilesInfo {
         format: r[1],
+        macro_format: r[2],
         profile_count: r[3],
         button_count: r[5],
         sector_count: r[6],
@@ -321,18 +361,43 @@ pub fn write_sector<T: Transport>(
     sector: UserSector,
     data: &ProfileSector,
 ) -> Result<()> {
-    if data.0.len() != usize::from(info.sector_size) {
-        return Err(Error::InvalidProfile(format!("{} bytes for a {}-byte sector", data.0.len(), info.sector_size)));
+    write_raw(dev, info, sector.0, &data.0)
+}
+
+/// Write a whole macro sector (see [`crate::macros`]), then read it back.
+/// The bytes must end in a correct CRC: the mouse refuses to finish a write
+/// that doesn't (spike 10).
+pub fn write_macro_sector<T: Transport>(
+    dev: &mut Device<T>,
+    info: &ProfilesInfo,
+    sector: MacroSector,
+    data: &[u8],
+) -> Result<()> {
+    let Some(body_len) = data.len().checked_sub(2) else {
+        return Err(Error::InvalidProfile("an empty macro sector".into()));
+    };
+    if crc(&data[..body_len]) != u16::from_be_bytes([data[body_len], data[body_len + 1]]) {
+        return Err(Error::InvalidProfile("macro sector CRC does not match".into()));
     }
-    let [s_hi, s_lo] = sector.0.to_be_bytes();
+    write_raw(dev, info, sector.0, data)
+}
+
+/// The write itself; callers have already checked which sector it is.
+/// A failed write may still have changed the sector (spike 10), so callers
+/// read it back before trusting what it holds.
+fn write_raw<T: Transport>(dev: &mut Device<T>, info: &ProfilesInfo, sector: u16, data: &[u8]) -> Result<()> {
+    if data.len() != usize::from(info.sector_size) {
+        return Err(Error::InvalidProfile(format!("{} bytes for a {}-byte sector", data.len(), info.sector_size)));
+    }
+    let [s_hi, s_lo] = sector.to_be_bytes();
     let [l_hi, l_lo] = info.sector_size.to_be_bytes();
     dev.request(Feature::OnboardProfiles, FN_MEMORY_ADDR_WRITE, &[s_hi, s_lo, 0, 0, l_hi, l_lo])?;
-    for chunk in data.0.chunks(CHUNK) {
+    for chunk in data.chunks(CHUNK) {
         dev.request(Feature::OnboardProfiles, FN_MEMORY_WRITE, chunk)?;
     }
     dev.request(Feature::OnboardProfiles, FN_MEMORY_WRITE_END, &[])?;
-    if read_raw(dev, info, sector.0)? != data.0 {
-        return Err(Error::WriteNotVerified { sector: sector.0 });
+    if read_raw(dev, info, sector)? != data {
+        return Err(Error::WriteNotVerified { sector });
     }
     Ok(())
 }
@@ -472,11 +537,15 @@ mod tests {
         assert_eq!(p3[9..], wheel);
     }
 
+    fn info() -> ProfilesInfo {
+        read_info(&mut mouse()).unwrap()
+    }
+
     #[test]
     fn with_button_changes_only_its_entry() {
         let p5 = profile(5);
         let f13 = ButtonAction::Key { modifiers: 0, usage: 0x68 };
-        let e = p5.with_button(8, f13).unwrap();
+        let e = p5.with_button(&info(), 8, f13).unwrap();
         let changed: Vec<usize> = (0..256).filter(|&i| e.bytes()[i] != p5.bytes()[i]).collect();
         assert!(changed.iter().all(|&i| (0x40..0x44).contains(&i) || i >= 254), "{changed:?}");
         assert_eq!(&e.bytes()[0x40..0x44], [0x80, 0x02, 0x00, 0x68]);
@@ -488,11 +557,28 @@ mod tests {
 
     #[test]
     fn with_button_refuses_left_click_and_other() {
-        let p = profile(4);
-        assert!(matches!(p.with_button(0, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
-        assert!(matches!(p.with_button(16, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
-        assert!(matches!(p.with_button(3, ButtonAction::Other([0, 1, 2, 3])), Err(Error::InvalidProfile(_))));
-        assert!(matches!(p.with_button(3, ButtonAction::Mouse(0)), Err(Error::InvalidProfile(_))));
+        let (p, info) = (profile(4), info());
+        assert!(matches!(p.with_button(&info, 0, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(&info, 16, ButtonAction::Mouse(1)), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(&info, 3, ButtonAction::Other([0, 1, 2, 3])), Err(Error::InvalidProfile(_))));
+        assert!(matches!(p.with_button(&info, 3, ButtonAction::Mouse(0)), Err(Error::InvalidProfile(_))));
+    }
+
+    #[test]
+    fn point_a_button_at_a_macro() {
+        // Spike 10: profile 5's G9 (entry 8) set to 00 06 00 00 played sector 6.
+        let (p5, info) = (profile(5), info());
+        let e = p5.with_button(&info, 8, ButtonAction::Macro { sector: 6, offset: 0 }).unwrap();
+        let changed: Vec<usize> = (0..256).filter(|&i| e.bytes()[i] != p5.bytes()[i]).collect();
+        assert!(changed.iter().all(|&i| (0x40..0x44).contains(&i) || i >= 254), "{changed:?}");
+        assert_eq!(&e.bytes()[0x40..0x44], [0x00, 0x06, 0x00, 0x00]);
+        assert_eq!(e.buttons(11)[8], ButtonAction::Macro { sector: 6, offset: 0 });
+        assert!(ProfileSector::parse(e.bytes().to_vec()).is_ok());
+        // Only macro sectors, and only from their first byte.
+        for (sector, offset) in [(0, 0), (5, 0), (0x10, 0), (6, 3)] {
+            let refused = p5.with_button(&info, 8, ButtonAction::Macro { sector, offset });
+            assert!(matches!(refused, Err(Error::InvalidProfile(_))), "{sector} {offset}");
+        }
     }
 
     #[test]
@@ -508,8 +594,10 @@ mod tests {
         for a in actions {
             assert_eq!(ButtonAction::decode(a.encode().unwrap()), a, "{a:?}");
         }
-        // Unknown entries decode as Other with their bytes.
-        for entry in [[0x00, 0x01, 0x02, 0x03], [0x90, 0x06, 0, 0], [0xff; 4]] {
+        assert_eq!(ButtonAction::decode([0x00, 0x09, 0x00, 0x00]), ButtonAction::Macro { sector: 9, offset: 0 });
+        assert_eq!(ButtonAction::Macro { sector: 9, offset: 0 }.encode().unwrap(), [0x00, 0x09, 0x00, 0x00]);
+        // Unknown entries decode as Other with their bytes; sector 0 is the directory, not a macro.
+        for entry in [[0x00, 0x01, 0x02, 0x03], [0x90, 0x06, 0, 0], [0xff; 4], [0; 4]] {
             assert_eq!(ButtonAction::decode(entry), ButtonAction::Other(entry));
         }
     }
@@ -538,6 +626,55 @@ mod tests {
             assert!(matches!(info.user_sector(profile), Err(Error::InvalidProfile(_))), "{profile}");
         }
         assert_eq!(info.user_sector(5).unwrap().number(), 5);
+    }
+
+    #[test]
+    fn only_macro_sectors_can_be_named() {
+        let info = info();
+        assert_eq!(info.macro_format, 1);
+        for sector in [0, 1, 5, 0x10, 0xff] {
+            assert!(matches!(info.macro_sector(sector), Err(Error::InvalidProfile(_))), "{sector}");
+        }
+        let all: Vec<u16> = info.macro_sectors().map(MacroSector::number).collect();
+        assert_eq!(all, (6..16).collect::<Vec<_>>());
+        let other_format = ProfilesInfo { macro_format: 2, ..info };
+        assert_eq!(other_format.macro_sectors().count(), 0);
+    }
+
+    #[test]
+    fn write_a_macro_sector() {
+        use crate::macros::{Macro, PlayMode, SectorContent, Step};
+        let mut dev = mouse();
+        let info = read_info(&mut dev).unwrap();
+        let sector = info.macro_sector(6).unwrap();
+        assert_eq!(SectorContent::of(&read_raw(&mut dev, &info, 6).unwrap()), SectorContent::Free, "zeros, as shipped");
+        let ab = Macro {
+            mode: PlayMode::Once,
+            steps: vec![
+                Step::KeyDown { modifiers: 0, usage: 0x04 },
+                Step::KeyUp { modifiers: 0, usage: 0x04 },
+                Step::KeyDown { modifiers: 0, usage: 0x05 },
+                Step::KeyUp { modifiers: 0, usage: 0x05 },
+            ],
+        };
+        write_macro_sector(&mut dev, &info, sector, &ab.sector(256).unwrap()).unwrap();
+        assert_eq!(SectorContent::of(&read_raw(&mut dev, &info, 6).unwrap()), SectorContent::Macro(ab));
+        assert_eq!(dev.transport_mut().profile_writes, [6]);
+        // A sector without a valid CRC is refused before anything is sent.
+        let mut bad = SectorContent::free_sector(256);
+        bad[255] ^= 1;
+        assert!(matches!(write_macro_sector(&mut dev, &info, sector, &bad), Err(Error::InvalidProfile(_))));
+        assert_eq!(dev.transport_mut().profile_writes, [6]);
+    }
+
+    #[test]
+    fn the_mouse_refuses_a_bad_crc() {
+        // Like the real mouse, the fake answers memoryWriteEnd with 0x04 and
+        // keeps the sector; only a direct write can get that far.
+        let mut dev = mouse();
+        let info = read_info(&mut dev).unwrap();
+        assert!(matches!(write_raw(&mut dev, &info, 6, &[0x11; 256]), Err(Error::Hidpp { code: 0x04, .. })));
+        assert_eq!(read_raw(&mut dev, &info, 6).unwrap(), [0; 256]);
     }
 
     #[test]

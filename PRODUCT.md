@@ -16,7 +16,7 @@ Later, other Linux users with Logitech HID++ devices, once it's shared (Gitea no
 
 ## Product Purpose
 
-860 Control is a gaming peripheral center for GNOME desktops; its goal is to bridge some of the gap between what the system supports and what the hardware can do. It is alpha software. Today it sets the lighting of the G512 and the G502 HERO, the mouse's DPI, report rate and onboard profiles, and the mouse's button actions, from a GNOME app and a Quick Settings tile. Success: the devices look and behave the way the user set them, and stay that way across replugs, suspend and login, without a vendor app.
+860 Control is a gaming peripheral center for GNOME desktops; its goal is to bridge some of the gap between what the system supports and what the hardware can do. It is alpha software. Today it sets the lighting of the G512 and the G502 HERO, the mouse's DPI, report rate and onboard profiles, the mouse's button actions, and macros stored on the mouse, from a GNOME app and a Quick Settings tile. Success: the devices look and behave the way the user set them, and stay that way across replugs, suspend and login, without a vendor app.
 
 ## Positioning
 
@@ -24,7 +24,7 @@ A background service (`g512d`) owns the devices and re-applies their state after
 
 ## Operating Context
 
-- Used now and then on the desktop: change an effect or colour, edit a key map, remap a mouse button, switch a profile. The tile covers the everyday toggles.
+- Used now and then on the desktop: change an effect or colour, edit a key map, remap a mouse button, record a macro, switch a profile. The tile covers the everyday toggles.
 - The Gaming key map turns on while a GameMode game runs.
 - The mouse's G9 button cycles profiles in the firmware, so the app follows the mouse, not only its own state.
 - One device can be missing while the other works; each view reports its own device.
@@ -32,9 +32,9 @@ A background service (`g512d`) owns the devices and re-applies their state after
 ## Capabilities and Constraints
 
 - Keyboard: Off, Static, Breathe, Colour cycle, Wave, Ripple, Custom (per-key maps: Custom and Gaming), brightness by colour scaling.
-- Mouse: logo and DPI strip lighting (match keyboard, or Off, Static, Breathe, Cycle); DPI steps, report rate and onboard profiles; button remapping. Macros are planned.
+- Mouse: logo and DPI strip lighting (match keyboard, or Off, Static, Breathe, Cycle); DPI steps, report rate and onboard profiles; button remapping; onboard macros (ten slots, recorded and edited in the app, played by the mouse itself; alpha).
 - Hardware today: G512 (`046d:c33c`) and G502 HERO (`046d:c08b`). Future work should leave room for other Logitech HID++ keyboards and mice rather than hard-coding only these two.
-- The service only calls an allowlist of HID++ features; firmware update, reset and engineering features are never used. Mouse profile writes go through a backup first.
+- The service only calls an allowlist of HID++ features; firmware update, reset and engineering features are never used. Mouse profile and macro writes go through a backup first, and only the profile sectors (1–5) and macro sectors (6–f) can be written.
 - The app has no device access; the udev rule grants the logged-in user access to the supported devices only.
 
 ## Brand Commitments

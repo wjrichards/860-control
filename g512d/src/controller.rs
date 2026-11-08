@@ -11,17 +11,19 @@ use g512_hidpp::{
     discovery::{Model, SYSFS_HIDRAW, find_lighting_interface},
     effects::{self, EffectKind, EffectParams, Zone},
     info::{self, DeviceInfo},
+    macros::{Macro, SectorContent},
     perkey::{self, Frame},
-    profiles::{self, ButtonAction, DpiRange, ProfileSector, ProfilesInfo},
+    profiles::{self, ButtonAction, DpiRange, MacroSector, ProfileSector, ProfilesInfo},
 };
 
 use crate::{
     buttons,
     keymap::{Corrections, KeyMap, MapName, compose, map_frame},
+    macros,
     mouse::{self, KeyboardView, MOUSE_EFFECTS, MouseSettings},
     profile_backup,
     state::{BRIGHTNESS_MAX, Effect, InvalidState, LightingState},
-    store::{Saved, Settings, Store},
+    store::{MacroName, Saved, Settings, Store},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +86,12 @@ pub enum SetError {
     Profile(String),
     /// The profile backup could not be saved, so nothing was written.
     Backup(io::Error),
+    /// The macro doesn't fit in one sector; nothing was written.
+    MacroTooLong(String),
+    /// Every macro sector is in use; nothing was written.
+    MacroMemoryFull,
+    /// Writing a macro sector failed; the message says what the sector holds now.
+    WriteFailed(String),
 }
 
 struct Connection<T> {
@@ -111,6 +119,17 @@ pub struct MouseProfiles {
     /// 1-based.
     pub active: u8,
     pub dpi_range: DpiRange,
+    /// Every macro sector and what it holds, in sector order.
+    macros: Vec<(MacroSector, SectorContent)>,
+}
+
+/// One macro as front ends see it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacroView {
+    pub sector: u8,
+    /// Empty when the service doesn't know it (made elsewhere, or changed).
+    pub name: String,
+    pub content: Macro,
 }
 
 /// One profile as front ends see it.
@@ -126,6 +145,31 @@ impl MouseProfiles {
     /// Each profile's button actions, profile 1 first.
     pub fn buttons(&self) -> Vec<Vec<ButtonAction>> {
         self.sectors.iter().map(|s| s.buttons(self.info.button_count)).collect()
+    }
+
+    /// What macro sector `sector` holds; `None` when it isn't one.
+    pub fn macro_at(&self, sector: u8) -> Option<&SectorContent> {
+        self.macros.iter().find(|(s, _)| s.number() == u16::from(sector)).map(|(_, c)| c)
+    }
+
+    /// (used, total) macro sectors; one holding commands the service can't
+    /// show counts as used.
+    pub fn macro_sectors(&self) -> (u8, u8) {
+        let used = self.macros.iter().filter(|(_, c)| *c != SectorContent::Free).count();
+        (used as u8, self.macros.len() as u8)
+    }
+
+    /// Every (profile, button) that plays the macro in `sector`, 1-based profiles.
+    fn macro_users(&self, sector: u8) -> Vec<(u8, u8)> {
+        let mut users = Vec::new();
+        for (profile, actions) in (1..).zip(self.buttons()) {
+            for (button, action) in (0..).zip(actions) {
+                if matches!(action, ButtonAction::Macro { sector: s, .. } if s == sector) {
+                    users.push((profile, button));
+                }
+            }
+        }
+        users
     }
 
     pub fn views(&self) -> Vec<ProfileView> {
@@ -444,6 +488,7 @@ impl<O: Opener> Controller<O> {
                 eprintln!("mouse connected: {} on {}", m.info.name, m.path.display());
                 self.mouse = Some(m);
                 self.mouse_status = DeviceStatus::Connected;
+                self.prune_macro_names();
                 self.apply_mouse_logged();
                 self.mouse.is_some()
             }
@@ -501,6 +546,7 @@ impl<O: Opener> Controller<O> {
             Ok(fresh) => *p = fresh,
             Err(e) => return Err(self.mouse_device_error(e)),
         }
+        self.prune_macro_names();
         self.apply_mouse_logged();
         Ok(())
     }
@@ -538,7 +584,12 @@ impl<O: Opener> Controller<O> {
             if button >= p.info.button_count {
                 return Err(format!("no button {button}; the mouse has {}", p.info.button_count));
             }
-            sector.with_button(button, action).map_err(|e| e.to_string())
+            if let ButtonAction::Macro { sector: s, .. } = action
+                && !matches!(p.macro_at(s), Some(SectorContent::Macro(_)))
+            {
+                return Err(format!("sector {s} holds no macro"));
+            }
+            sector.with_button(&p.info, button, action).map_err(|e| e.to_string())
         })?;
         eprintln!("mouse profile {number}: button {button} is now {kind} {value:#06x} (modifiers {modifiers:#04x})");
         Ok(())
@@ -570,6 +621,162 @@ impl<O: Opener> Controller<O> {
         if p.active == number {
             self.apply_mouse_logged();
         }
+        Ok(())
+    }
+
+    /// The mouse's macros with their names; empty when the profiles aren't
+    /// readable.
+    pub fn mouse_macros(&self) -> Vec<MacroView> {
+        let Some(p) = self.mouse_profiles() else { return Vec::new() };
+        p.macros
+            .iter()
+            .filter_map(|(sector, content)| {
+                let SectorContent::Macro(m) = content else { return None };
+                let sector = sector.number() as u8;
+                let name = self.macro_name(sector, m).unwrap_or_default();
+                Some(MacroView { sector, name, content: m.clone() })
+            })
+            .collect()
+    }
+
+    /// The saved name for the macro in `sector`, if it was given to these bytes.
+    fn macro_name(&self, sector: u8, m: &Macro) -> Option<String> {
+        let saved = self.settings.macro_names.get(&sector)?;
+        let bytes = m.encode().ok()?;
+        (saved.fingerprint == macros::fingerprint(&bytes)).then(|| saved.name.clone())
+    }
+
+    /// Drop the names that no longer match their sector, e.g. a macro
+    /// changed on another computer.
+    fn prune_macro_names(&mut self) {
+        let Some(p) = self.mouse.as_ref().and_then(|m| m.profiles.as_ref()) else { return };
+        let stale: Vec<u8> = self
+            .settings
+            .macro_names
+            .keys()
+            .copied()
+            .filter(|&sector| match p.macro_at(sector) {
+                Some(SectorContent::Macro(m)) => self.macro_name(sector, m).is_none(),
+                _ => true,
+            })
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        for sector in stale {
+            self.settings.macro_names.remove(&sector);
+        }
+        self.persist();
+    }
+
+    /// Save a macro on the mouse: a new one in the lowest free sector when
+    /// `sector` is 0, or a new version of the one in `sector`. Saves the
+    /// macro backup first (once ever); returns the sector. A failed write
+    /// puts the sector's previous content back.
+    pub fn save_mouse_macro(&mut self, sector: u8, name: &str, mode: &str, steps: &[(String, u16, u8)]) -> Result<u8, SetError> {
+        let mode = macros::mode_from_bus(mode).map_err(SetError::Profile)?;
+        let steps = steps
+            .iter()
+            .map(|(kind, value, modifiers)| macros::step_from_bus(kind, *value, *modifiers))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(SetError::Profile)?;
+        let content = Macro { mode, steps };
+        let backup = self.store.path().with_file_name("mouse-macros-backup.txt");
+        let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
+        let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
+        let bytes = content.sector(usize::from(p.info.sector_size)).map_err(|e| SetError::MacroTooLong(e.to_string()))?;
+        let index = if sector == 0 {
+            p.macros.iter().position(|(_, c)| *c == SectorContent::Free).ok_or(SetError::MacroMemoryFull)?
+        } else {
+            p.macros
+                .iter()
+                .position(|(s, c)| s.number() == u16::from(sector) && matches!(c, SectorContent::Macro(_)))
+                .ok_or_else(|| SetError::Profile(format!("sector {sector} holds no macro")))?
+        };
+        let target = p.macros[index].0;
+        match profile_backup::save_macros_once(&mut m.device, &p.info, &backup) {
+            Ok(true) => eprintln!("saved the mouse's macro sectors to {}", backup.display()),
+            Ok(false) => {}
+            Err(e) => return Err(SetError::Backup(e)),
+        }
+        let before = match profiles::read_raw(&mut m.device, &p.info, target.number()) {
+            Ok(b) => b,
+            Err(e) => return Err(self.mouse_device_error(e)),
+        };
+        if let Err(e) = profiles::write_macro_sector(&mut m.device, &p.info, target, &bytes) {
+            if is_link_error(&e) {
+                return Err(self.mouse_device_error(e));
+            }
+            let outcome = Self::put_back(&mut m.device, &p.info, target, &before);
+            return Err(SetError::WriteFailed(format!("{e}; {outcome}")));
+        }
+        let fingerprint = content.encode().map(|b| macros::fingerprint(&b));
+        p.macros[index].1 = SectorContent::Macro(content);
+        let number = target.number() as u8;
+        let name = name.trim();
+        match fingerprint {
+            Ok(fingerprint) if !name.is_empty() => {
+                self.settings.macro_names.insert(number, MacroName { fingerprint, name: name.into() });
+            }
+            _ => {
+                self.settings.macro_names.remove(&number);
+            }
+        }
+        self.persist();
+        eprintln!("mouse macro {name:?} saved in sector {number}");
+        Ok(number)
+    }
+
+    /// After a failed macro write, make sure the sector holds what it held
+    /// before: a refused write may still have changed it (spike 10). A free
+    /// sector is freed again with a valid CRC. Says what happened.
+    fn put_back(device: &mut Device<O::Transport>, info: &ProfilesInfo, sector: MacroSector, before: &[u8]) -> String {
+        let now = profiles::read_raw(device, info, sector.number());
+        let free = SectorContent::of(before) == SectorContent::Free;
+        let result = match now {
+            Ok(now) if now == before || (free && SectorContent::of(&now) == SectorContent::Free) => {
+                return "the mouse is unchanged".into();
+            }
+            _ if free => profiles::write_macro_sector(device, info, sector, &SectorContent::free_sector(before.len())),
+            _ => profiles::write_macro_sector(device, info, sector, before),
+        };
+        match result {
+            Ok(()) => "the previous content was written back".into(),
+            Err(e) => format!("putting the previous content back failed too ({e})"),
+        }
+    }
+
+    /// Delete the macro in `sector`: first set every button that plays it,
+    /// in every profile, to disabled, then free the sector and drop its
+    /// name. A failed profile write stops before the macro is touched.
+    pub fn delete_mouse_macro(&mut self, sector: u8) -> Result<(), SetError> {
+        let p = self.mouse_profiles().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
+        match p.macro_at(sector) {
+            Some(SectorContent::Free) | None => return Err(SetError::Profile(format!("sector {sector} holds no macro"))),
+            Some(_) => {}
+        }
+        for (profile, button) in p.macro_users(sector) {
+            self.edit_mouse_profile(profile, |p, s| s.with_button(&p.info, button, ButtonAction::Disabled).map_err(|e| e.to_string()))?;
+            eprintln!("mouse profile {profile}: button {button} no longer plays the macro in sector {sector}");
+        }
+        let backup = self.store.path().with_file_name("mouse-macros-backup.txt");
+        let m = self.mouse.as_mut().ok_or_else(|| SetError::Profile("the mouse is not connected".into()))?;
+        let p = m.profiles.as_mut().ok_or_else(|| SetError::Profile("the mouse's profiles are not available".into()))?;
+        let index = p.macros.iter().position(|(s, _)| s.number() == u16::from(sector)).expect("checked above");
+        let target = p.macros[index].0;
+        match profile_backup::save_macros_once(&mut m.device, &p.info, &backup) {
+            Ok(true) => eprintln!("saved the mouse's macro sectors to {}", backup.display()),
+            Ok(false) => {}
+            Err(e) => return Err(SetError::Backup(e)),
+        }
+        let free = SectorContent::free_sector(usize::from(p.info.sector_size));
+        if let Err(e) = profiles::write_macro_sector(&mut m.device, &p.info, target, &free) {
+            return Err(self.mouse_device_error(e));
+        }
+        p.macros[index].1 = SectorContent::Free;
+        self.settings.macro_names.remove(&sector);
+        self.persist();
+        eprintln!("mouse macro in sector {sector} deleted");
         Ok(())
     }
 
@@ -696,7 +903,11 @@ impl<O: Opener> Controller<O> {
             .collect::<Result<Vec<_>, _>>()?;
         let active = profiles::current_profile(device)?;
         let dpi_range = profiles::dpi_range(device)?;
-        Ok(MouseProfiles { info, sectors, active, dpi_range })
+        let macros = info
+            .macro_sectors()
+            .map(|s| Ok((s, SectorContent::of(&profiles::read_raw(device, &info, s.number())?))))
+            .collect::<Result<Vec<_>, HidppError>>()?;
+        Ok(MouseProfiles { info, sectors, active, dpi_range, macros })
     }
 
     /// What the mouse should show, from the keyboard's settings and its own.
@@ -1625,6 +1836,142 @@ mod tests {
         }
         assert!(m.borrow().as_ref().unwrap().borrow().profile_writes.is_empty());
         assert!(!backup_path(&c).exists(), "nothing written, not even the backup");
+    }
+
+    fn macros_backup_path(c: &Controller<FakeOpener>) -> PathBuf {
+        c.store.path().with_file_name("mouse-macros-backup.txt")
+    }
+
+    /// Copy line: Home, 50 ms, Shift+End, 50 ms, Ctrl+C, as sent on the bus.
+    fn copy_line() -> Vec<(String, u16, u8)> {
+        let tap = |usage: u16, mods: u8| [("key-down".to_string(), usage, mods), ("key-up".to_string(), usage, mods)];
+        let pause = || ("pause".to_string(), 50, 0);
+        let mut steps = Vec::new();
+        steps.extend(tap(0x4a, 0));
+        steps.push(pause());
+        steps.extend(tap(0x4d, 2));
+        steps.push(pause());
+        steps.extend(tap(0x06, 1));
+        steps
+    }
+
+    fn writes(m: &Handle) -> Vec<u16> {
+        m.borrow().as_ref().unwrap().borrow().profile_writes.clone()
+    }
+
+    #[test]
+    fn mouse_macros_are_read_on_connect() {
+        let (mut c, _, _) = with_mouse("macros-read", &[], &["g502"]);
+        c.connect_mouse();
+        assert!(c.mouse_macros().is_empty(), "sectors 6-f are zeros, as shipped");
+        assert_eq!(c.mouse_profiles().unwrap().macro_sectors(), (0, 10));
+    }
+
+    #[test]
+    fn save_a_new_macro_after_a_backup() {
+        let (mut c, _, m) = with_mouse("macros-save", &[], &["g502"]);
+        c.connect_mouse();
+        assert_eq!(c.save_mouse_macro(0, " Copy line ", "once", &copy_line()).unwrap(), 6);
+        let backup = fs::read_to_string(macros_backup_path(&c)).unwrap();
+        assert!(backup.contains("sector 0x0006: crc not valid"), "the backup holds the sectors from before the write");
+        assert!(!backup_path(&c).exists(), "no profile was written");
+        let saved = c.mouse_macros();
+        assert_eq!((saved[0].sector, saved[0].name.as_str(), saved[0].content.steps.len()), (6, "Copy line", 8));
+        assert_eq!(c.mouse_profiles().unwrap().macro_sectors(), (1, 10));
+        assert_eq!(writes(&m), [6]);
+        // The next one goes in the lowest free sector; a new version stays put.
+        assert_eq!(c.save_mouse_macro(0, "Reload", "held", &copy_line()[..2]).unwrap(), 7);
+        assert_eq!(c.save_mouse_macro(6, "Copy line 2", "toggle", &copy_line()).unwrap(), 6);
+        assert_eq!(writes(&m), [6, 7, 6]);
+        let names: Vec<_> = c.mouse_macros().into_iter().map(|v| (v.sector, v.name)).collect();
+        assert_eq!(names, [(6, "Copy line 2".to_string()), (7, "Reload".to_string())]);
+        // Names survive a restart: they're in the state file.
+        let state = fs::read_to_string(c.store.path()).unwrap();
+        assert!(state.contains("[macros.6]") && state.contains("name = \"Copy line 2\""), "{state}");
+    }
+
+    #[test]
+    fn macro_saves_are_validated() {
+        let (mut c, _, m) = with_mouse("macros-invalid", &[], &["g502"]);
+        c.connect_mouse();
+        let long: Vec<_> = (0..43).flat_map(|_| copy_line()[..2].to_vec()).collect();
+        assert!(matches!(c.save_mouse_macro(0, "Long", "once", &long), Err(SetError::MacroTooLong(_))));
+        for (sector, mode, steps) in [
+            (0, "release", copy_line()),
+            (0, "once", vec![("pause".to_string(), 0, 0)]),
+            (0, "once", vec![("jump".to_string(), 6, 0)]),
+            (6, "once", copy_line()),
+            (5, "once", copy_line()),
+        ] {
+            let result = c.save_mouse_macro(sector, "x", mode, &steps);
+            assert!(matches!(result, Err(SetError::Profile(_))), "{sector} {mode} {steps:?}");
+        }
+        assert!(writes(&m).is_empty());
+        assert!(!macros_backup_path(&c).exists(), "nothing written, not even the backup");
+    }
+
+    #[test]
+    fn memory_full() {
+        let (mut c, _, m) = with_mouse("macros-full", &[], &["g502"]);
+        c.connect_mouse();
+        for n in 6..16 {
+            assert_eq!(c.save_mouse_macro(0, &format!("m{n}"), "once", &copy_line()).unwrap(), n);
+        }
+        assert!(matches!(c.save_mouse_macro(0, "one more", "once", &copy_line()), Err(SetError::MacroMemoryFull)));
+        assert_eq!(writes(&m).len(), 10);
+        assert_eq!(c.mouse_profiles().unwrap().macro_sectors(), (10, 10));
+    }
+
+    #[test]
+    fn a_button_plays_a_macro_until_it_is_deleted() {
+        let (mut c, _, m) = with_mouse("macros-delete", &[], &["g502"]);
+        c.connect_mouse();
+        c.save_mouse_macro(0, "Copy line", "once", &copy_line()).unwrap();
+        assert!(matches!(c.set_mouse_button(4, 8, "macro", 7, 0), Err(SetError::Profile(_))), "sector 7 is free");
+        c.set_mouse_button(4, 8, "macro", 6, 0).unwrap();
+        c.set_mouse_button(2, 5, "macro", 6, 0).unwrap();
+        assert_eq!(button(&c, 4, 8), ButtonAction::Macro { sector: 6, offset: 0 });
+        assert_eq!(writes(&m), [6, 4, 2]);
+        c.delete_mouse_macro(6).unwrap();
+        assert_eq!(writes(&m), [6, 4, 2, 2, 4, 6], "buttons freed first, then the sector");
+        assert_eq!((button(&c, 2, 5), button(&c, 4, 8)), (ButtonAction::Disabled, ButtonAction::Disabled));
+        assert!(c.mouse_macros().is_empty());
+        assert!(c.settings().macro_names.is_empty());
+        let sector = m.borrow().as_ref().unwrap().borrow().sector(6).unwrap().to_vec();
+        assert_eq!(SectorContent::of(&sector), SectorContent::Free);
+        assert_eq!(&sector[..254], [0xff; 254], "freed with ff and a valid CRC, not zeros");
+        assert!(matches!(c.delete_mouse_macro(6), Err(SetError::Profile(_))), "nothing left to delete");
+    }
+
+    #[test]
+    fn a_macro_changed_elsewhere_loses_its_name() {
+        let (mut c, _, m) = with_mouse("macros-stale", &[], &["g502"]);
+        c.connect_mouse();
+        c.save_mouse_macro(0, "Copy line", "once", &copy_line()).unwrap();
+        c.save_mouse_macro(0, "Reload", "once", &copy_line()[..2]).unwrap();
+        // Another computer rewrites sector 6.
+        let fake = m.borrow().as_ref().unwrap().clone();
+        let mut dev = g512_hidpp::Device::open(SharedFake(fake)).unwrap();
+        let info = profiles::read_info(&mut dev).unwrap();
+        let other = Macro { mode: g512_hidpp::macros::PlayMode::Once, steps: vec![g512_hidpp::macros::Step::Pause(9)] };
+        profiles::write_macro_sector(&mut dev, &info, info.macro_sector(6).unwrap(), &other.sector(256).unwrap()).unwrap();
+        c.set_mouse_active_profile(4).unwrap();
+        let names: Vec<_> = c.mouse_macros().into_iter().map(|v| (v.sector, v.name)).collect();
+        assert_eq!(names, [(6, String::new()), (7, "Reload".to_string())]);
+        assert_eq!(c.settings().macro_names.keys().copied().collect::<Vec<_>>(), [7]);
+    }
+
+    #[test]
+    fn a_failed_macro_write_leaves_the_mouse_as_it_was() {
+        let (mut c, _, m) = with_mouse("macros-corrupt", &[], &["g502-corrupt"]);
+        c.connect_mouse();
+        let result = c.save_mouse_macro(0, "Copy line", "once", &copy_line());
+        let Err(SetError::WriteFailed(msg)) = result else { panic!("{result:?}") };
+        assert!(msg.contains("unchanged") || msg.contains("written back"), "{msg}");
+        assert!(c.mouse_macros().is_empty());
+        assert!(c.settings().macro_names.is_empty());
+        let sector = m.borrow().as_ref().unwrap().borrow().sector(6).unwrap().to_vec();
+        assert_eq!(SectorContent::of(&sector), SectorContent::Free);
     }
 
     #[test]
