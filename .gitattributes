@@ -1,0 +1,3 @@
+# OpenSpec evidence (hardware spikes and check scripts) is not part of the
+# product; keep it out of the GitHub and GitLab language bars.
+openspec/** linguist-documentation
